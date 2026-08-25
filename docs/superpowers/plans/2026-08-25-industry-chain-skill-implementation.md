@@ -12,7 +12,7 @@
 
 ## 全局约束
 
-- 项目根目录固定为 `E:\industry-chain-paeser-skills`。
+- 项目根目录固定为 `E:\researching-industry-chains`。
 - 不导入、不复制、不调用 `E:\Industry-chain-parser-v3` 的代码、Skill 或配置。
 - 只维护一份通用 `SKILL.md`，不写死 Codex、Trae 或浏览器插件名称。
 - 模型业务输出只能是 `{"records": [{九字段记录}]}`。
@@ -81,7 +81,7 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "industry-chain-paeser-skills"
+name = "researching-industry-chains"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [

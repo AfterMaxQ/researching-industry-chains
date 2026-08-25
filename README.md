@@ -61,6 +61,7 @@ runs/<runner_id>/<runner_id>_交付数据.xlsx
 
 ## 文档
 
+- [使用指南](USAGE.md)
 - [通用运行 Skill](SKILL.md)
 - [项目指令](AGENTS.md)
 - [项目设计](docs/superpowers/specs/2026-08-25-industry-chain-skill-design.md)

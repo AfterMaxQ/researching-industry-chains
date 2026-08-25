@@ -2,7 +2,7 @@
 
 ## 1. 项目定义
 
-项目位于 `E:\industry-chain-paeser-skills`，提供一套不绑定具体 Agent 的产业链检索、解析和交付能力。
+项目位于 `E:\researching-industry-chains`，提供一套不绑定具体 Agent 的产业链检索、解析和交付能力。
 
 项目接收外部主题配置，由 Agent 完成主题领取、公开资料搜索、来源筛选、浏览器操作、视觉读图、产业链还原和企业归属判断。Python Client 管理批次、主题状态、结构化数据、并发写入和 XLSX 交付。
 
