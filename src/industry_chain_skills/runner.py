@@ -269,7 +269,10 @@ class RunnerService:
             topic["claim"] = None
             topic["last_error"] = None
             state["updated_at"] = now.isoformat()
-            return self._status_from_state(state, now)
+            return {
+                **_topic_view(topic),
+                "runner": self._status_from_state(state, now),
+            }
 
         return self.store.mutate_state(runner_id, mutation)
 
@@ -291,6 +294,10 @@ class RunnerService:
             topic["claim"] = None
             topic["last_error"] = {"code": code, "message": message}
             state["updated_at"] = now.isoformat()
-            return self._status_from_state(state, now)
+            return {
+                **_topic_view(topic),
+                "last_error": topic["last_error"],
+                "runner": self._status_from_state(state, now),
+            }
 
         return self.store.mutate_state(runner_id, mutation)
