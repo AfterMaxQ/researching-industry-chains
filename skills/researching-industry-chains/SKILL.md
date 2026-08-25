@@ -50,10 +50,10 @@ industry-chain topic renew --runner-id <runner_id> --node-id <node_id> --claim-t
 
 ### 研究 Agent 启动提示词模板
 
-创建 Runner、领取主题或派发并行任务后，将下列模板连同实际参数发送给研究 Agent。未使用的可选字段删除；多个主题并行时，每个 Agent 只填写自己负责的 `node_id` 范围。
+创建 Runner、领取主题或派发SubAgent的并行任务时，将下列模板连同实际参数分别发送给研究 Agent。未使用的可选字段删除；多个主题并行时，每个 SubAgent 只填写自己负责的 `node_id` 范围。
 
 ```text
-你负责执行产业链来源检索与交付任务。请先阅读本 Skill，并仅处理以下 Runner 和主题范围。
+你负责执行产业链来源检索与交付任务。请先阅读 researching-industry-chains/SKILL.md，对于每一个主题遵守SKILL里对于 #单个主题的执行流程 里面的步骤与规则，并仅处理以下 Runner 和主题范围。
 
 Runner ID：{{runner_id}}
 负责 node_id：{{node_id 或 node_id 范围}}
@@ -69,7 +69,7 @@ claim_token：{{claim_token；未领取时留空}}
 
 必须遵守来源完整扫描、企业归属、九字段、租约和搜索饱和规则。连续两轮没有新增独立合格来源后，才提交 completed 或 no_qualified_source；运行异常提交 fail。所有写入、修改和终态操作携带有效 claim_token。
 
-完成负责范围后，才汇报每个主题的 node_id、终态、来源组数、数据行数、来源 URL 和交付文件路径。不要只汇报搜索结果，不要在主题尚未完成时结束任务。
+每个主题提交 `completed`、`no_qualified_source` 或 `fail` 后，立即简要汇报该主题的 node_id、正式主题、终态、来源组数、数据行数、来源 URL 和交付文件路径；失败时补充失败原因。负责范围全部结束后再汇总汇报。不要只汇报搜索结果，不要在主题尚未完成时结束任务。
 ```
 
 ## 单个主题的执行流程
@@ -183,6 +183,8 @@ industry-chain topic finish --runner-id <runner_id> --node-id <node_id> --claim-
 ```text
 industry-chain topic fail --runner-id <runner_id> --node-id <node_id> --claim-token <claim_token> --code <错误代码> --message <简短说明>
 ```
+
+每个主题提交终态后立即简要汇报结果，至少包括 `node_id`、正式主题、终态、来源组数量、写入行数、来源 URL 和交付 XLSX 路径；失败主题补充失败原因。批量任务不必等全部主题结束后再统一汇报。
 
 自动批次只持续使用 `topic claim-next`处理 `pending`主题。没有可领取的待处理主题后查看 Runner 状态并停止；失败主题留给明确指定的补跑，不在同一轮自动反复领取。
 
