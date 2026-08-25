@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["records"],
+  "properties": {
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "主题",
+          "信源主体",
+          "分类1",
+          "分类2",
+          "分类3",
+          "分类4",
+          "公司",
+          "信源URL",
+          "备注"
+        ],
+        "properties": {
+          "主题": {"type": "string"},
+          "信源主体": {"type": "string"},
+          "分类1": {"type": "string"},
+          "分类2": {"type": "string"},
+          "分类3": {"type": "string"},
+          "分类4": {"type": "string"},
+          "公司": {"type": "string"},
+          "信源URL": {"type": "string"},
+          "备注": {"type": "string"}
+        }
+      }
+    }
+  }
+}
