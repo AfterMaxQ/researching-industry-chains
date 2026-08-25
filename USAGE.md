@@ -56,7 +56,7 @@ industry-chain identity search --config E:\data\topic_identity.yaml --query 半�
 
 ## 4. 让研究 Agent 加载 Skill
 
-按照所用 Agent 的 Skill 配置方式，把整个`E:\researching-industry-chains`目录注册为 Skill。Agent 应能够读取项目根目录中的`SKILL.md`，并调用本机的`industry-chain`命令。
+按照所用 Agent 的 Skill 配置方式，把`E:\researching-industry-chains\skills\researching-industry-chains`注册为 Skill 包。Agent 应能够读取该目录中的`SKILL.md`，并调用本机的`industry-chain`命令。
 
 启动前确认 Agent 同时拥有搜索、浏览器、截图或 PDF 渲染、图像视觉理解和终端命令能力。只有文本抓取或 OCR、但不能实际看图的 Agent 不满足本 Skill 的执行条件。
 

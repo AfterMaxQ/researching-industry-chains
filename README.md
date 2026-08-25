@@ -7,7 +7,7 @@
 要求 Python 3.11 或更高版本。
 
 ```text
-python -m pip install -e ".[test]"
+python -m pip install -e .
 ```
 
 外部 Agent 需要具备互联网搜索、可操作网页和 PDF 的浏览器、截图或高分辨率渲染、实际视觉读图以及调用本地 CLI 的能力。
@@ -62,6 +62,5 @@ runs/<runner_id>/<runner_id>_交付数据.xlsx
 ## 文档
 
 - [使用指南](USAGE.md)
-- [通用运行 Skill](SKILL.md)
+- [通用运行 Skill](skills/researching-industry-chains/SKILL.md)
 - [项目指令](AGENTS.md)
-- [项目设计](docs/superpowers/specs/2026-08-25-industry-chain-skill-design.md)
