@@ -168,8 +168,12 @@ claim_token：{{claim_token；未领取时留空}}
 
 完整解析并汇总一个来源后，一次原子写入该来源的全部行：
 
+Windows PowerShell 向原生命令传递中文时，必须显式使用 UTF-8；不要直接把中文 here-string 管道给 CLI，否则字段名可能乱码并被 Client 拒绝。
+
 ```powershell
-@'
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$env:PYTHONIOENCODING = 'utf-8'
+$payload = @'
 {"records":[
   {
     "主题":"正式主题",
@@ -183,7 +187,8 @@ claim_token：{{claim_token；未领取时留空}}
     "备注":""
   }
 ]}
-'@ | industry-chain dataset insert --runner-id <runner_id> --scope source_group --parent-id <node_id> --claim-token <claim_token> --input -
+'@
+$payload | industry-chain dataset insert --runner-id <runner_id> --scope source_group --parent-id <node_id> --claim-token <claim_token> --input -
 ```
 
 成功响应会返回 `source_group_id`和每行 `row_id`。需要纠正时先用 `dataset get`查看，再使用 `dataset patch`、`dataset replace`或`dataset remove`精确修改。不要在来源尚未扫描完整时逐行写入。每次来源级写入成功后，Client 会原子保存状态并刷新 XLSX。

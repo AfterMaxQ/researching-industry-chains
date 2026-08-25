@@ -160,8 +160,12 @@ industry-chain topic claim --runner-id <runner_id> --node-id <node_id> --reopen
 
 通过标准输入提交来源组：
 
+Windows PowerShell 向原生命令传递中文时，必须显式使用 UTF-8；不要直接把中文 here-string 管道给 CLI。
+
 ```powershell
-@'
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$env:PYTHONIOENCODING = 'utf-8'
+$payload = @'
 {"records":[
   {
     "主题":"正式主题",
@@ -175,7 +179,8 @@ industry-chain topic claim --runner-id <runner_id> --node-id <node_id> --reopen
     "备注":""
   }
 ]}
-'@ | industry-chain dataset insert --runner-id <runner_id> --scope source_group --parent-id <node_id> --claim-token <claim_token> --input -
+'@
+$payload | industry-chain dataset insert --runner-id <runner_id> --scope source_group --parent-id <node_id> --claim-token <claim_token> --input -
 ```
 
 不要创建或保存来源 JSON 文件；如果 CLI 校验失败，在内存中修正 `records` 后重新通过标准输入提交。
