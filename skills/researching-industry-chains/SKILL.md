@@ -48,12 +48,12 @@ industry-chain topic claim --runner-id <runner_id> --node-id <node_id> --reopen
 industry-chain topic renew --runner-id <runner_id> --node-id <node_id> --claim-token <claim_token>
 ```
 
-### 研究 Agent 启动提示词模板
+### SubAgent 启动提示词模板（如果用户显示指定启用SubAgent）
 
 创建 Runner、领取主题或派发SubAgent的并行任务时，将下列模板连同实际参数分别发送给研究 Agent。未使用的可选字段删除；多个主题并行时，每个 SubAgent 只填写自己负责的 `node_id` 范围。
 
 ```text
-你负责执行产业链来源检索与交付任务。请先阅读 researching-industry-chains/SKILL.md，对于每一个主题遵守SKILL里对于 #单个主题的执行流程 里面的步骤与规则，并仅处理以下 Runner 和主题范围。
+你是负责执行产业链来源检索与交付任务的SubAgent。请先阅读 researching-industry-chains/SKILL.md，对于每一个主题的执行遵守SKILL里单个主题的执行流程里面的步骤与规则，并仅处理以下 Runner 和主题范围。
 
 Runner ID：{{runner_id}}
 负责 node_id：{{node_id 或 node_id 范围}}
@@ -130,9 +130,9 @@ claim_token：{{claim_token；未领取时留空}}
 
 ### 5. 形成来源组并写入
 
-每个独立来源只生成以下 JSON 外壳，不增加证据、置信度、搜索过程、截图或推理字段：
+每个独立来源完整解析后，在内存中整理 CLI 所需的 `records` 数据，不增加证据、置信度、搜索过程、截图或推理字段。不要创建或保存中间 JSON 文件，数据只通过标准输入传给 CLI：
 
-```json
+```text
 {
   "records": [
     {
@@ -154,11 +154,27 @@ claim_token：{{claim_token；未领取时留空}}
 
 完整解析并汇总一个来源后，一次原子写入该来源的全部行：
 
-```text
-industry-chain dataset insert --runner-id <runner_id> --scope source_group --parent-id <node_id> --claim-token <claim_token> --input <来源JSON文件>
+```powershell
+@'
+{"records":[
+  {
+    "主题":"正式主题",
+    "信源主体":"发布主体",
+    "分类1":"上游",
+    "分类2":"节点",
+    "分类3":"",
+    "分类4":"",
+    "公司":"企业名称",
+    "信源URL":"https://example.com/report",
+    "备注":""
+  }
+]}
+'@ | industry-chain dataset insert --runner-id <runner_id> --scope source_group --parent-id <node_id> --claim-token <claim_token> --input -
 ```
 
 成功响应会返回 `source_group_id`和每行 `row_id`。需要纠正时先用 `dataset get`查看，再使用 `dataset patch`、`dataset replace`或`dataset remove`精确修改。不要在来源尚未扫描完整时逐行写入。每次来源级写入成功后，Client 会原子保存状态并刷新 XLSX。
+
+成功响应会返回 `source_group_id`和每行 `row_id`。需要纠正时先用 `dataset get`查看，在内存中修正 `records` 后再次通过标准输入提交，或使用 `dataset patch`、`dataset replace`和 `dataset remove`精确修改。不要创建来源 JSON 文件，不要运行 `python -m json.tool`检查中间文件，也不要在来源尚未扫描完整时逐行写入。每次来源级写入成功后，Client 会原子保存状态并刷新 XLSX。
 
 截图、PDF、网页下载物、OCR 中间文件和其他证据材料只用于当前判断，不写入 Runner。Runner 目录只保留 `runner.json`和当前交付 XLSX，不创建`evidence`目录或其他证据文件。
 
@@ -197,5 +213,5 @@ industry-chain topic fail --runner-id <runner_id> --node-id <node_id> --claim-to
 - 完整页面或报告已扫描，后续企业图没有遗漏。
 - 用作证据的图片页均已由视觉能力实际查看。
 - 每个独立节点路径一行，企业只挂在直接证据支持的层级。
-- 一个来源一次提交完整 `records`，首行之外备注为空。
+- 一个来源一次通过 CLI 标准输入提交完整 `records`，首行之外备注为空，不创建中间 JSON 文件。
 - 搜索完成连续两个无新增轮次后才提交终态。

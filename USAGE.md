@@ -94,7 +94,7 @@ industry-chain identity search --config E:\data\topic_identity.yaml --query 半�
 4. 对所有用于节点或企业判断的图片页实际执行视觉检查；
 5. 先按原图还原产业链树，再把每条根到节点路径转换成一条九字段记录；
 6. 企业只写在来源直接支持的节点行，父节点企业不继承给子节点；
-7. 完整解析一个来源后，一次提交该来源的全部`records`；
+7. 完整解析一个来源后，通过 CLI 标准输入一次提交该来源的全部`records`，不创建中间 JSON 文件；
 8. 继续搜索，直到连续两个完整搜索轮次都没有新增独立合格来源；
 9. 有来源组时提交`completed`，没有合格来源时提交`no_qualified_source`，运行异常时提交`failed`。
 
@@ -136,9 +136,9 @@ industry-chain topic claim --runner-id <runner_id> --node-id <node_id>
 industry-chain topic claim --runner-id <runner_id> --node-id <node_id> --reopen
 ```
 
-## 7. 来源组 JSON 的含义
+## 7. 来源组提交方式
 
-一个网页、报告或 PDF 对应一个独立来源组。Agent 完整扫描该来源后，生成以下格式：
+一个网页、报告或 PDF 对应一个独立来源组。Agent 完整扫描该来源后，在内存中整理以下 `records` 数据结构，并通过 CLI 标准输入提交。不创建或保存来源 JSON 文件。
 
 ```json
 {
@@ -157,6 +157,28 @@ industry-chain topic claim --runner-id <runner_id> --node-id <node_id> --reopen
   ]
 }
 ```
+
+通过标准输入提交来源组：
+
+```powershell
+@'
+{"records":[
+  {
+    "主题":"正式主题",
+    "信源主体":"发布主体",
+    "分类1":"上游",
+    "分类2":"节点",
+    "分类3":"",
+    "分类4":"",
+    "公司":"企业名称",
+    "信源URL":"https://example.com/report",
+    "备注":""
+  }
+]}
+'@ | industry-chain dataset insert --runner-id <runner_id> --scope source_group --parent-id <node_id> --claim-token <claim_token> --input -
+```
+
+不要创建或保存来源 JSON 文件；如果 CLI 校验失败，在内存中修正 `records` 后重新通过标准输入提交。
 
 每一行表示“原图产业链树中从根节点到某个节点的完整路径”，公司字段只包含直接归属于该路径终点节点的企业。不是一家企业一行，也不能把多个独立叶子节点合并为一行。
 
@@ -209,7 +231,7 @@ CLI 成功时返回：
 {"ok": false, "error": {"code": "错误代码", "message": "中文错误说明"}}
 ```
 
-遇到来源组校验错误时，应修正当前来源的完整 JSON 后重新提交，不能拆成逐行写入来绕过来源级校验。
+遇到来源组校验错误时，应在内存中修正当前来源的 `records` 后重新通过标准输入提交，不能创建中间 JSON 文件，也不能拆成逐行写入来绕过来源级校验。
 
 ## 10. 审核和纠正数据
 
