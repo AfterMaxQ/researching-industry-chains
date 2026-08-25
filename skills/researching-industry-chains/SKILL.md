@@ -48,6 +48,30 @@ industry-chain topic claim --runner-id <runner_id> --node-id <node_id> --reopen
 industry-chain topic renew --runner-id <runner_id> --node-id <node_id> --claim-token <claim_token>
 ```
 
+### 研究 Agent 启动提示词模板
+
+创建 Runner、领取主题或派发并行任务后，将下列模板连同实际参数发送给研究 Agent。未使用的可选字段删除；多个主题并行时，每个 Agent 只填写自己负责的 `node_id` 范围。
+
+```text
+你负责执行产业链来源检索与交付任务。请先阅读本 Skill，并仅处理以下 Runner 和主题范围。
+
+Runner ID：{{runner_id}}
+负责 node_id：{{node_id 或 node_id 范围}}
+当前主题：{{主题；并行任务可留空，领取后以 CLI 返回为准}}
+主题 path：{{path}}
+主题 aliases：{{aliases}}
+claim_token：{{claim_token；未领取时留空}}
+主题配置：{{topic_identity.yaml 路径}}
+
+请完成负责范围内的主题处理：领取或确认主题、检索并核验独立合格来源、完整检查网页或报告后续内容、按原图还原产业链树、将企业挂到直接证据支持的节点，并通过 industry-chain CLI 写入来源组。图片或页面元素看不清时，裁切并放大核心区域后再判断。
+
+每个来源必须同时具备产业链结构和至少一组明确企业归属证据；一个来源完整解析后一次性写入全部九字段记录。不要混合不同 URL 或不同底层文档，不要根据常识补企业或节点，不要把证据文件、截图、PDF、脚本或日志写入 Runner。Runner 只保留 runner.json 和交付 XLSX。
+
+必须遵守来源完整扫描、企业归属、九字段、租约和搜索饱和规则。连续两轮没有新增独立合格来源后，才提交 completed 或 no_qualified_source；运行异常提交 fail。所有写入、修改和终态操作携带有效 claim_token。
+
+完成负责范围后，才汇报每个主题的 node_id、终态、来源组数、数据行数、来源 URL 和交付文件路径。不要只汇报搜索结果，不要在主题尚未完成时结束任务。
+```
+
 ## 单个主题的执行流程
 
 ### 1. 确认主题身份
