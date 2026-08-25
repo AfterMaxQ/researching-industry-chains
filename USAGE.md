@@ -33,19 +33,33 @@ industry-chain --help
 
 ## 3. 准备主题配置
 
-主题配置使用 YAML。`themes`下的键是正式主题，`path`用于理解主题在目录中的位置，`aliases`是允许用于搜索和主题匹配的别名。
+主题配置文件名可以自定义，通常命名为`topic_identity.yaml`。文件使用 YAML，顶层必须是`themes`对象。`themes`下的键是正式主题，`path`用于理解主题在目录中的位置，`aliases`是经过批准、可用于搜索和主题匹配的别名。下面是可直接复制的模板：
 
 ```yaml
 themes:
-  半导体与精密装备:
-    path: [先进制造, 半导体与精密装备]
-    aliases: [半导体及设备, 先进半导体装备]
-  服务器散热:
-    path: [数字基础设施, 服务器散热]
-    aliases: [数据中心散热]
+  正式主题示例:
+    path:
+      - 一级目录
+      - 二级目录
+    aliases:
+      - 已批准别名一
+      - 已批准别名二
+
+  另一个正式主题:
+    path:
+      - 另一目录
+    aliases: []
 ```
 
-创建 Runner 后，Client 会保存这份目录的内部快照。以后修改外部 YAML，只影响新建 Runner，不改变已有 Runner 的主题名称、编号和状态。
+填写时遵守以下格式：
+
+- `themes`必须存在，且每个主题键都是非空的正式主题名称；
+- `path`必须是至少包含一个非空字符串的数组；
+- `aliases`可以为空，但必须是字符串数组；
+- `themes`中的排列顺序就是 Runner 的配置顺序；
+- `path`只表示主题在目录中的位置，不会成为产业链节点，也不会写入九字段数据。
+
+创建 Runner 后，Client 会保存这份目录的内部快照，包括正式主题、`path`、`aliases`、配置顺序和自动生成的`node_id`。以后修改外部 YAML，只影响新建 Runner，不改变已有 Runner 的主题名称、编号和状态。正式主题必须在配置中存在，不能由 Agent 临时新增或临时生成别名。
 
 可以在创建任务前查询配置：
 
@@ -89,7 +103,7 @@ industry-chain identity search --config E:\data\topic_identity.yaml --query 半�
 下面的提示词用于让父 Agent 创建 Runner、拆分任务和派发子 Agent。它不是子 Agent 的启动提示词；父 Agent 应使用 Skill 中的子 Agent 启动模板继续派发。
 
 ```text
-请使用 researching-industry-chains Skill 完成本次产业链检索任务。
+请作为父 Agent使用 researching-industry-chains Skill 完成本次产业链检索任务。
 
 先阅读并遵守：
 - researching-industry-chains/SKILL.md
@@ -131,7 +145,7 @@ industry-chain identity search --config E:\data\topic_identity.yaml --query 半�
 指定三个主题时，可以直接使用：
 
 ```text
-请使用 researching-industry-chains Skill，新建一个 Runner，并派发 3 个子 Agent，分别处理：
+请作为父 Agent使用 researching-industry-chains Skill，新建一个 Runner，并派发 3 个子 Agent，分别处理：
 
 1. 灵巧手丝杠
 2. 绿色能源金融

@@ -12,6 +12,28 @@ python -m pip install -e ./skills/researching-industry-chains
 
 `SKILL.md`、Client 源码、Schema 和安装配置位于同一个独立 Skill 包`skills/researching-industry-chains/`。外部 Agent 需要具备互联网搜索、可操作网页和 PDF 的浏览器、截图或高分辨率渲染、实际视觉读图以及调用本地 CLI 的能力。
 
+## 主题配置
+
+创建 Runner 时通过`--config`传入一个`topic_identity.yaml`。文件的顶层必须是`themes`对象；每个键是一个正式主题，`path`是主题在目录中的位置，`aliases`是该主题允许使用的别名。可直接复制下面的模板：
+
+```yaml
+themes:
+  正式主题示例:
+    path:
+      - 一级目录
+      - 二级目录
+    aliases:
+      - 已批准别名一
+      - 已批准别名二
+
+  另一个正式主题:
+    path:
+      - 另一目录
+    aliases: []
+```
+
+格式要求：`path`必须是非空字符串数组，`aliases`必须是字符串数组；没有别名时使用`aliases: []`。`themes`中主题的书写顺序就是配置顺序。`path`只用于理解主题位置，不会被当作产业链节点。创建 Runner 后，Client 会把正式主题、`path`、`aliases`、配置顺序和自动生成的`node_id`保存为快照；之后修改外部 YAML 只影响新建 Runner。
+
 ## 命令
 
 安装后使用`industry-chain`。命令组包括：
