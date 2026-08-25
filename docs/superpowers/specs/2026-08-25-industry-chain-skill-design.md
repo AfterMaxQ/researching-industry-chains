@@ -571,15 +571,17 @@ industry-chain dataset remove
 
 每个 Runner 使用独立文件锁。主题领取、状态变更、续期和所有数据修改均在锁内执行。
 
+主题领取、续期、结束和失败只修改 `runner.json`，不重建内容未变化的 XLSX。来源组、数据行或主题业务数据发生变化时，同时提交 JSON 和 XLSX。
+
 写入流程：
 
 1. 获取 Runner 锁。
 2. 读取并校验当前 `runner.json`。
 3. 校验目标 ID、令牌、租约和位置。
 4. 在内存中应用操作。
-5. 执行 Schema 和跨行校验。
-6. 生成临时 JSON 和临时 XLSX。
-7. 替换正式文件；失败时恢复操作前状态。
+5. 执行对应的状态或业务数据校验。
+6. 状态操作只生成临时 JSON；数据操作生成临时 JSON 和临时 XLSX。
+7. 替换对应正式文件；失败时恢复操作前状态。
 8. 释放锁。
 
 进程异常后以 `runner.json`为状态来源，`runner export`根据当前 JSON 重建 XLSX。Client 不根据 XLSX 反向生成内部状态。
@@ -604,7 +606,7 @@ XLSX 契约：
 - 单个候选页面失效时跳过该候选并继续搜索。
 - 搜索、浏览器、截图或视觉能力整体不可用时主题失败。
 - Runner 锁超时时不绕过锁写入。
-- XLSX 被占用时返回 `XLSX_LOCKED`，不提交新的 Runner 状态。
+- 数据操作或导出时 XLSX 被占用，返回 `XLSX_LOCKED`并保持数据不变；不影响只更新 JSON 的领取、续期和状态操作。
 - Runner JSON 损坏时返回 `RUNNER_STATE_INVALID`，不根据 XLSX 猜测恢复。
 - 过期令牌写入返回明确错误，不修改数据。
 
@@ -618,7 +620,7 @@ Python 包按职责划分：
 - `identity.py`：YAML 读取、主题查询和快照构建
 - `runner.py`：Runner 生命周期、主题状态、领取令牌和租约
 - `dataset.py`：三个作用域的读取和数据操作
-- `storage.py`：文件锁、原子持久化和恢复
+- `storage.py`：文件锁、状态 JSON 提交、数据 JSON/XLSX 提交和恢复
 - `excel.py`：九列 XLSX 和超链接
 - `errors.py`：稳定错误代码
 
@@ -631,6 +633,8 @@ Python 包按职责划分：
 `SKILL.md`描述运行时业务流程、能力要求和 CLI 使用方式。`AGENTS.md`描述项目业务背景、数据含义、证据规则、Client 边界、文档规则和验收要求。
 
 README、AGENTS.md、SKILL.md、接口说明和其他项目文档只描述当前有效状态、业务规则、接口和使用方式。
+
+所有项目文档、SKILL、注释、docstring、错误信息、测试说明和用户可见文本使用中文。Python 关键字、标准库、第三方依赖名、包名、模块名、类名、函数名、变量名、CLI 命令和机器协议字段保留稳定英文形式。
 
 项目文档不包含：
 
