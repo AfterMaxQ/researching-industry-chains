@@ -54,7 +54,7 @@ industry-chain identity get --config E:\data\topic_identity.yaml --topic 半导�
 industry-chain identity search --config E:\data\topic_identity.yaml --query 半导体
 ```
 
-## 4. 让研究 Agent 加载 Skill
+## 4. 让 Agent 加载 Skill
 
 按照所用 Agent 的 Skill 配置方式，把`E:\researching-industry-chains\skills\researching-industry-chains`注册为 Skill 包。该目录同时包含`SKILL.md`、`pyproject.toml`、Client 源码和 Schema。Agent 应能够读取其中的`SKILL.md`，并调用安装后生成的`industry-chain`命令。
 
@@ -82,6 +82,67 @@ industry-chain identity search --config E:\data\topic_identity.yaml --query 半�
 ```text
 使用 researching-industry-chains Skill 补跑 Runner：<runner_id>中的节点：<node_id>。
 如果该主题已经是终态，显式重开后继续处理。
+```
+
+### 用户发给父 Agent 的调度提示词
+
+下面的提示词用于让父 Agent 创建 Runner、拆分任务和派发子 Agent。它不是子 Agent 的启动提示词；父 Agent 应使用 Skill 中的子 Agent 启动模板继续派发。
+
+```text
+请使用 researching-industry-chains Skill 完成本次产业链检索任务。
+
+先阅读并遵守：
+- researching-industry-chains/SKILL.md
+- 项目 AGENTS.md
+
+任务配置：
+- 主题配置文件：<topic_identity.yaml 路径>
+- 任务名称：<任务名称>
+- 处理范围：<全部主题 / 指定主题 / 指定 node_id>
+- Runner 输出目录：<runs 目录；不填写时使用项目默认 runs>
+
+请由你作为父 Agent 完成完整调度：
+
+1. 创建一个新的 Runner，并保存 runner_id；
+2. 读取 Runner 中的主题快照，确认正式主题、path、aliases 和 node_id；
+3. 如果处理多个主题，先统计待处理主题数量，再决定子 Agent 数量，并尽量均分 node_id 范围；
+4. 为每个子 Agent 分配明确且互不重叠的 node_id 或 node_id 范围；
+5. 使用 Skill 中的启动提示词模板派发子 Agent，不额外预设来源、节点或企业结果；
+6. 持续查看子 Agent 状态，必要时处理租约、失败和补跑；
+7. 子 Agent 每完成一个主题后，立即汇总该主题的终态、来源组数量、写入行数、来源 URL 和 XLSX 路径；
+8. 所有主题处理完成后，查看 Runner 总状态并汇报最终交付文件。
+
+父 Agent 和子 Agent 都必须遵守以下边界：
+
+- 产业链来源必须先通过产业链证据门禁；
+- 必须先确认明确的产业链图、产业链表格，或结构化的上游/中游/下游节点；
+- 系统架构、技术路线、零部件清单或企业名单不能单独拼成产业链；
+- 必须使用浏览器和视觉能力实际查看图片、网页和 PDF；
+- 图片或页面元素看不清时，裁切并放大核心区域后再判断；
+- 企业只能挂到来源直接支持的节点；
+- 不得把不同 URL 或不同报告混合；
+- 不得创建中间 JSON、截图、PDF、脚本、日志或 evidence 文件；
+- Runner 只保留 runner.json 和交付 XLSX；
+- 每个来源完整解析后，通过 CLI 一次性写入全部 records；
+- 子 Agent 完成主题后必须立即简要汇报；
+- 不要在整个批次结束后才统一汇报。
+```
+
+指定三个主题时，可以直接使用：
+
+```text
+请使用 researching-industry-chains Skill，新建一个 Runner，并派发 3 个子 Agent，分别处理：
+
+1. 灵巧手丝杠
+2. 绿色能源金融
+3. 原油
+
+主题配置文件：
+E:\Industry-chain-parser-v3\image-parsing-askci\config\topic_identity.yaml
+
+请先读取 SKILL.md 和 AGENTS.md，确认三个主题的正式名称、path、aliases 和 node_id。每个子 Agent 只负责一个主题，使用 Skill 中的通用启动提示词，不要在派发提示词中预设具体来源、节点或企业。
+
+父 Agent 负责创建 Runner、派发子 Agent、监控租约和状态，并在每个主题完成后立即汇报结果。所有来源都必须先通过产业链证据门禁，确认有明确产业链图、产业链表格或结构化产业链节点后，才能生成记录和写入来源组。
 ```
 
 ## 5. 理解 Agent 的处理过程
