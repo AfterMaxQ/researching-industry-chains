@@ -7,10 +7,10 @@
 要求 Python 3.11 或更高版本。
 
 ```text
-python -m pip install -e .
+python -m pip install -e ./skills/researching-industry-chains
 ```
 
-外部 Agent 需要具备互联网搜索、可操作网页和 PDF 的浏览器、截图或高分辨率渲染、实际视觉读图以及调用本地 CLI 的能力。
+`SKILL.md`、Client 源码、Schema 和安装配置位于同一个独立 Skill 包`skills/researching-industry-chains/`。外部 Agent 需要具备互联网搜索、可操作网页和 PDF 的浏览器、截图或高分辨率渲染、实际视觉读图以及调用本地 CLI 的能力。
 
 ## 命令
 
