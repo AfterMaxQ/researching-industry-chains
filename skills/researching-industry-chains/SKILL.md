@@ -134,6 +134,8 @@ industry-chain dataset insert --runner-id <runner_id> --scope source_group --par
 
 成功响应会返回 `source_group_id`和每行 `row_id`。需要纠正时先用 `dataset get`查看，再使用 `dataset patch`、`dataset replace`或`dataset remove`精确修改。不要在来源尚未扫描完整时逐行写入。每次来源级写入成功后，Client 会原子保存状态并刷新 XLSX。
 
+截图、PDF、网页下载物、OCR 中间文件和其他证据材料只用于当前判断，不写入 Runner。Runner 目录只保留 `runner.json`和当前交付 XLSX，不创建`evidence`目录或其他证据文件。
+
 ### 6. 搜索饱和与终态
 
 写入一个来源后继续搜索，不设置固定篇数。一个完整搜索轮次至少覆盖正式主题、全部批准别名、主题相关表达，并分别组合“产业链、产业图谱、全景图、研究报告、企业布局、竞争格局”等限定词；检查搜索结果的后续页或等价结果范围，并对发现的 URL 做底层文档去重。第二轮应改变查询组合或来源入口。连续两轮均无新增独立合格来源，才算搜索饱和。
