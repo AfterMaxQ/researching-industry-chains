@@ -359,4 +359,3 @@ git diff -- skills/researching-industry-chains/SKILL.md
 - 新 Runner 验证不复用旧 checkpoint，固定正例和负例均通过；
 - Client、九字段、JSON/XLSX、租约和终态契约没有变化；
 - git diff --name-status 和完整 diff 通过最终范围审查。
-
