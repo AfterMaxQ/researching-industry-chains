@@ -33,6 +33,8 @@ industry-chain --help
 
 项目默认在当前目录的 `runs` 文件夹中保存 Runner。
 
+新任务默认创建新的 Runner，不扫描或复用 `runs/` 中同主题历史结果。只有用户明确要求继续、续跑、补跑已有 Runner，或明确给出 `runner_id` 时，才使用该指定 Runner。
+
 ## 3. 选择主题输入方式
 
 创建 Runner 时，`--topic` 和 `--config` 必须二选一。
