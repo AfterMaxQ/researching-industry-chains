@@ -70,7 +70,7 @@ industry-chain identity search --config E:\data\topic_identity.yaml --query 半�
 
 ## 4. 让 Agent 加载 Skill
 
-按照所用 Agent 的 Skill 配置方式，把`E:\researching-industry-chains\skills\researching-industry-chains`注册为 Skill 包。该目录同时包含`SKILL.md`、`pyproject.toml`、Client 源码和 Schema。Agent 应能够读取其中的`SKILL.md`，并调用安装后生成的`industry-chain`命令。
+按照所用 Agent 的 Skill 配置方式，把`.\researching-industry-chains\skills\researching-industry-chains`注册为 Skill 包。该目录同时包含`SKILL.md`、`pyproject.toml`、Client 源码和 Schema。Agent 应能够读取其中的`SKILL.md`，并调用安装后生成的`industry-chain`命令。
 
 启动前确认 Agent 同时拥有搜索、浏览器、截图或 PDF 渲染、图像视觉理解和终端命令能力。只有文本抓取或 OCR、但不能实际看图的 Agent 不满足本 Skill 的执行条件。
 
@@ -80,7 +80,7 @@ industry-chain identity search --config E:\data\topic_identity.yaml --query 半�
 
 ```text
 使用 researching-industry-chains Skill 新建一个名为“产业链检索”的批次。
-主题配置位于 E:\data\topic_identity.yaml。
+主题配置位于 ...\topic_identity.yaml。
 依次处理全部待处理主题，按 Skill 规则搜索、读图、写入并提交主题状态。
 ```
 
@@ -94,7 +94,7 @@ industry-chain identity search --config E:\data\topic_identity.yaml --query 半�
 ### 指定补跑
 
 ```text
-使用 researching-industry-chains Skill 补跑 Runner：<runner_id>中的节点：<node_id>。
+使用 researching-industry-chains Skill 补跑 Runner：<runner_id>中的节点：<node_id>/主题名:<主题名>。
 如果该主题已经是终态，显式重开后继续处理。
 ```
 
@@ -142,7 +142,7 @@ industry-chain identity search --config E:\data\topic_identity.yaml --query 半�
 - 不要在整个批次结束后才统一汇报。
 ```
 
-指定三个主题时，可以直接使用：
+或者，例如指定三个主题时，可以直接使用：
 
 ```text
 请作为父 Agent使用 researching-industry-chains Skill，新建一个 Runner，并派发 3 个子 Agent，分别处理：
@@ -152,7 +152,7 @@ industry-chain identity search --config E:\data\topic_identity.yaml --query 半�
 3. 原油
 
 主题配置文件：
-E:\Industry-chain-parser-v3\image-parsing-askci\config\topic_identity.yaml
+...\topic_identity.yaml(配置文件路径)
 
 请先读取 SKILL.md 和 AGENTS.md，确认三个主题的正式名称、path、aliases 和 node_id。每个子 Agent 只负责一个主题，使用 Skill 中的通用启动提示词，不要在派发提示词中预设具体来源、节点或企业。
 
@@ -182,7 +182,7 @@ E:\Industry-chain-parser-v3\image-parsing-askci\config\topic_identity.yaml
 创建 Runner：
 
 ```powershell
-industry-chain runner create --name 产业链检索 --config E:\data\topic_identity.yaml
+industry-chain runner create --name 产业链检索 --config ..\topic_identity.yaml
 ```
 
 响应中的`data.runner_id`是后续所有操作必须使用的 Runner ID。
@@ -235,8 +235,6 @@ industry-chain topic claim --runner-id <runner_id> --node-id <node_id> --reopen
 
 通过标准输入提交来源组：
 
-Windows PowerShell 向原生命令传递中文时，必须显式使用 UTF-8；不要直接把中文 here-string 管道给 CLI。
-
 ```powershell
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $env:PYTHONIOENCODING = 'utf-8'
@@ -258,7 +256,7 @@ $payload = @'
 $payload | industry-chain dataset insert --runner-id <runner_id> --scope source_group --parent-id <node_id> --claim-token <claim_token> --input -
 ```
 
-不要创建或保存来源 JSON 文件；如果 CLI 校验失败，在内存中修正 `records` 后重新通过标准输入提交。
+不创建或保存来源 JSON 文件；如果 CLI 校验失败，在内存中修正 `records` 后重新通过标准输入提交。
 
 每一行表示“原图产业链树中从根节点到某个节点的完整路径”，公司字段只包含直接归属于该路径终点节点的企业。不是一家企业一行，也不能把多个独立叶子节点合并为一行。
 
