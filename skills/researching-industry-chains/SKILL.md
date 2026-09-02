@@ -21,6 +21,8 @@ description: Use when 需要围绕正式产业主题检索并交付可核对的�
 - 实际视觉读图能力；
 - 可调用的 `industry-chain` CLI。
 
+如果任务尚未创建 Runner，主题输入有两种方式：批量任务使用 `--config <topic_identity.yaml>`；用户只给一个正式主题时直接使用 `--topic <主题>` 创建单主题 Runner，不得为了单主题临时生成配置文件。
+
 缺少影响网页/PDF查看、视觉判断或 CLI 写入的关键能力时，不得用 OCR、正文或常识猜测代替；领取主题后发现能力不可用，提交失败状态。
 
 ## 业务不变量
@@ -400,10 +402,21 @@ industry-chain topic fail --runner-id <runner_id> --node-id <node_id> --claim-to
 
 ## Runner 与租约
 
-所有 Runner 命令显式传入 `--runner-id`：
+创建 Runner 时，主题输入必须二选一：
 
 ```text
+# 批量主题
 industry-chain runner create --name <任务名称> --config <topic_identity.yaml路径>
+
+# 单个主题
+industry-chain runner create --name <任务名称> --topic <正式主题>
+```
+
+用户只给单个主题且没有 config 时，直接使用 `--topic`。不得为了兼容批量入口临时生成 YAML。单主题 Runner 只有 `node_0001`，`path` 为 `[正式主题]`，`aliases` 为空；创建后与批量 Runner 使用完全相同的 claim、insert、finish 流程。
+
+后续 Runner 和主题命令显式传入 `--runner-id`：
+
+```text
 industry-chain runner status --runner-id <runner_id>
 industry-chain topic claim-next --runner-id <runner_id>
 industry-chain topic claim --runner-id <runner_id> --node-id <node_id>
