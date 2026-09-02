@@ -52,7 +52,7 @@ themes:
 - `topic search|get|claim-next|claim|renew|finish|fail`：查询主题并管理状态和租约；
 - `dataset get|insert|patch|replace|remove`：按主题、来源组或数据行操作交付数据。
 
-所有 Runner 相关命令必须显式传入`--runner-id`。命令成功时输出`{"ok": true, "data": ...}`，业务错误时输出`{"ok": false, "error": ...}`。
+创建和列出 Runner 不需要 `--runner-id`；对已有 Runner、主题或数据执行后续操作时显式传入 `--runner-id`。命令成功时输出`{"ok": true, "data": ...}`，业务错误时输出`{"ok": false, "error": ...}`。
 
 ## Runner 使用
 
