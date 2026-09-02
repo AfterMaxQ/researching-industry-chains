@@ -8,6 +8,8 @@
 
 新任务默认新建 Runner。除非用户明确要求继续、续跑或补跑某个已有 Runner，或明确提供 `runner_id`，研究 Agent 不得扫描 `runs/` 寻找同主题历史结果，也不得复用已有 JSON、XLSX、来源组或历史搜索结果。续跑时只使用用户指定的 Runner，不自行选择其它同主题 Runner。
 
+研究 Agent 执行 Client 时，以**当前仓库源码**为 CLI 合同，默认使用 `python skills/researching-industry-chains/run_cli.py ...`。PATH 中已安装的 `industry-chain` 只是人工快捷入口，不作为能力判断依据；如果它的 `--help` 与当前源码或文档不一致，不得据此认定功能缺失，也不得退回临时 YAML 等替代流程。单主题任务仍必须使用当前源码支持的 `--topic`；只有项目本地 launcher 本身无法运行时，才按环境阻塞处理。
+
 ## 九字段与行语义
 
 每条记录固定包含九个字符串字段：
