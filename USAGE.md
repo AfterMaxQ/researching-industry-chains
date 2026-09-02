@@ -318,14 +318,18 @@ $payload | industry-chain dataset insert --runner-id <runner_id> --scope source_
 
 ### 重复来源错误
 
-同一 Runner、同一主题写入重复来源时，Client 可能返回：
+同一 Runner、同一主题中，Client 可能返回：
 
-- `SOURCE_GROUP_DUPLICATE_URL`：该主题已经存在相同 `信源URL`；
-- `SOURCE_GROUP_DUPLICATE_CONTENT`：虽然 URL 不同，但完整节点路径和每个节点的企业集合与已有来源完全相同。
+- `SOURCE_GROUP_DUPLICATE_URL`：已经存在相同 `信源URL`；
+- `SOURCE_GROUP_DUPLICATE_CONTENT`：URL 不同，但能够识别出相同原始信源主体，且完整节点路径和每个节点的企业集合与已有来源完全相同。
 
-这两种情况都不应通过修改 URL、删节点、改公司字段、改备注或逐行提交绕过。直接跳过该候选来源，继续搜索下一来源；重复候选不计为新增独立合格来源。
+原创页的原始主体就是 `信源主体` 本身；转载页按 `当前发布平台（原始主体）` 中括号内的主体判断。`当前发布平台（原始主体未明）` 不参与内容重复判定。不同原始主体即使业务内容完全一致，也不会仅凭内容被 Client 自动判重。
 
-仅节点结构相同但企业证据不同不会自动判重。第一版去重只在当前 Runner 的当前主题内执行，不查询历史 Runner，也不做模糊相似度或模型判断。
+重复不变量不只在 `source_group insert` 时检查。后续 `source_group patch/replace`、`row insert/patch/replace/remove` 和带来源组的主题创建/替换，也不能制造父主题不一致或同主题确定性重复。
+
+出现重复错误时，不应通过修改 URL、删节点、改公司字段、改备注或逐行提交绕过。直接跳过重复候选，或在人工审核修改时保留两个来源之间真实存在的差异。
+
+仅节点结构相同但企业证据不同不会自动判重。去重只在当前 Runner 的当前主题内执行，不查询历史 Runner，也不做模糊相似度或模型判断。
 
 ## 10. 查看交付文件
 
@@ -380,5 +384,7 @@ CLI 成功时返回：
 - `replace`：原子替换整行、整篇来源组或整个主题；
 - `remove`：删除单行、来源组或主题；
 - `insert`：在末尾或指定 `before_id、after_id` 位置插入。
+
+所有会改变来源组最终内容的操作都会重新执行来源组结构、父主题一致性和同主题确定性去重检查。
 
 审核终态主题时不需要研究领取令牌，但不能把 `completed` 主题改成零来源组，也不能直接向 `no_qualified_source` 主题加入来源组。需要改变这种终态时，先显式重开主题。
