@@ -25,6 +25,8 @@ description: Use when 需要围绕正式产业主题检索并交付可核对的�
 
 **新任务默认必须新建 Runner。** 除非用户明确要求继续、续跑或补跑某个已有 Runner，或明确提供 `runner_id`，否则不得扫描 `runs/` 寻找同主题历史结果，不得复用已有 JSON、XLSX、来源组或历史搜索结果，也不得据此跳过当前搜索流程。“再跑一次、重新跑、用最新版 Skill 跑”仍按新任务处理。续跑时只能使用用户指定的 Runner，不自行选择其它同主题 Runner。
 
+**执行 Client 时以当前仓库源码为 CLI 合同。** 研究 Agent 默认使用 `python skills/researching-industry-chains/run_cli.py ...` 调用当前 checkout 的 Client；PATH 中已安装的 `industry-chain` 只作为人工快捷入口，不作为能力判断依据。如果已安装命令的 `--help` 与当前 Skill 或源码不一致，不得因此认定功能缺失，也不得回退到临时 YAML、旧参数或其它业务流程，直接改用项目本地 launcher。本文后续示例仍以 `industry-chain` 简写同一套参数；只有项目本地 launcher 本身无法运行时，才视为 CLI 能力缺失。
+
 缺少影响网页/PDF 查看、视觉判断或 CLI 写入的关键能力时，不得用 OCR、正文或常识猜测代替；领取主题后发现能力不可用，提交失败状态。
 
 ## 业务不变量
