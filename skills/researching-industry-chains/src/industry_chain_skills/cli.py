@@ -54,7 +54,9 @@ def build_parser() -> argparse.ArgumentParser:
     runner_commands = runner.add_subparsers(dest="action", required=True)
     runner_create = runner_commands.add_parser("create", help="创建 Runner")
     runner_create.add_argument("--name", required=True)
-    runner_create.add_argument("--config", type=Path, required=True)
+    topic_source = runner_create.add_mutually_exclusive_group(required=True)
+    topic_source.add_argument("--config", type=Path)
+    topic_source.add_argument("--topic")
     runner_commands.add_parser("list", help="列出 Runner")
     for action in ("status", "export"):
         child = runner_commands.add_parser(action, help=f"Runner {action}")
@@ -146,7 +148,7 @@ def dispatch(args: argparse.Namespace) -> object:
 
     if args.command == "runner":
         if args.action == "create":
-            data = runner.create(args.name, args.config)
+            data = runner.create(args.name, args.config, args.topic)
             return _with_xlsx(data, args.runs_root, data["runner_id"])
         if args.action == "list":
             return store.list_summaries()
