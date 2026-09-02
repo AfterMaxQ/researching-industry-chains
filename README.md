@@ -1,6 +1,6 @@
 # 产业链检索与交付客户端
 
-本项目用于管理产业链资料检索批次，并把研究 Agent 生成的九字段来源组实时保存为 Runner JSON 和可交付 XLSX。Client 提供主题目录快照、并发领取租约、数据校验、稳定定位修改和超链接工作簿导出；搜索、浏览器操作、截图和视觉判断由外部 Agent 完成。
+本项目用于管理产业链资料检索批次，并把研究 Agent 生成的九字段来源组实时保存为 Runner JSON 和可交付 XLSX。Client 提供主题快照、并发领取租约、数据校验、稳定定位修改和超链接工作簿导出；搜索、浏览器操作、截图和视觉判断由外部 Agent 完成。
 
 ## 安装
 
@@ -12,9 +12,14 @@ python -m pip install -e ./skills/researching-industry-chains
 
 `SKILL.md`、Client 源码、Schema 和安装配置位于同一个独立 Skill 包`skills/researching-industry-chains/`。外部 Agent 需要具备互联网搜索、可操作网页和 PDF 的浏览器、截图或高分辨率渲染、实际视觉读图以及调用本地 CLI 的能力。
 
-## 主题配置
+## 主题输入
 
-创建 Runner 时通过`--config`传入一个`topic_identity.yaml`。文件的顶层必须是`themes`对象；每个键是一个正式主题，`path`是主题在目录中的位置，`aliases`是该主题允许使用的别名。可直接复制下面的模板：
+创建 Runner 有两种入口，必须二选一：
+
+- **批量主题**：通过 `--config` 传入 `topic_identity.yaml`；
+- **单个主题**：直接通过 `--topic` 传入正式主题名称，不需要配置文件。
+
+批量配置文件的顶层必须是`themes`对象；每个键是一个正式主题，`path`是主题在目录中的位置，`aliases`是该主题允许使用的别名。可直接复制下面的模板：
 
 ```yaml
 themes:
@@ -32,7 +37,11 @@ themes:
     aliases: []
 ```
 
-格式要求：`path`必须是非空字符串数组，`aliases`必须是字符串数组；没有别名时使用`aliases: []`。`themes`中主题的书写顺序就是配置顺序。`path`只用于理解主题位置，不会被当作产业链节点。创建 Runner 后，Client 会把正式主题、`path`、`aliases`、配置顺序和自动生成的`node_id`保存为快照；之后修改外部 YAML 只影响新建 Runner。
+格式要求：`path`必须是非空字符串数组，`aliases`必须是字符串数组；没有别名时使用`aliases: []`。`themes`中主题的书写顺序就是配置顺序。`path`只用于理解主题位置，不会被当作产业链节点。
+
+单主题模式会直接创建一个只含该主题的 Runner：`node_id` 为 `node_0001`，`path` 为 `[主题]`，`aliases` 为空。Agent 不需要也不应为了单个主题临时生成 YAML 配置文件。
+
+创建 Runner 后，Client 会把正式主题、`path`、`aliases`、顺序和自动生成的`node_id`保存为快照。批量模式下之后修改外部 YAML 只影响新建 Runner。
 
 ## 命令
 
@@ -47,10 +56,16 @@ themes:
 
 ## Runner 使用
 
-新建批次：
+批量主题：
 
 ```text
 industry-chain runner create --name 产业链批次 --config E:\path\topic_identity.yaml
+```
+
+单个主题：
+
+```text
+industry-chain runner create --name 锡膏 --topic 锡膏
 ```
 
 继续批次：
