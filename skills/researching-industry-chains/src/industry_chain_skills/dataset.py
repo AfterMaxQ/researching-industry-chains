@@ -20,6 +20,63 @@ RECORD_VALIDATOR = Draft202012Validator(
     json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 )
 SHARED_FIELDS = ("主题", "信源主体", "信源URL")
+CATEGORY_FIELDS = ("分类1", "分类2", "分类3", "分类4")
+
+
+def _record_path(record: dict[str, str]) -> tuple[str, ...]:
+    """返回一行业务记录的完整分类路径。"""
+    return tuple(record[field] for field in CATEGORY_FIELDS if record[field])
+
+
+def _company_key(company: str) -> tuple[str, ...]:
+    """把顿号分隔的企业集合转换为与顺序无关的确定性键。"""
+    return tuple(sorted(item.strip() for item in company.split("、") if item.strip()))
+
+
+def _source_content_key(
+    records: list[dict[str, str]],
+) -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]:
+    """生成与 URL、备注、信源主体和行顺序无关的来源业务内容键。"""
+    return tuple(
+        sorted(
+            (_record_path(record), _company_key(record["公司"]))
+            for record in records
+        )
+    )
+
+
+def _reject_duplicate_source_group(
+    topic: dict,
+    records: list[dict[str, str]],
+) -> None:
+    """拒绝同一主题中 URL 或业务内容完全重复的来源组。"""
+    incoming_url = records[0]["信源URL"]
+    incoming_key = _source_content_key(records)
+
+    for group in topic["source_groups"]:
+        existing_records = [row["record"] for row in group["rows"]]
+        if not existing_records:
+            continue
+
+        existing_url = existing_records[0]["信源URL"]
+        details = {
+            "existing_source_group_id": group["source_group_id"],
+            "existing_url": existing_url,
+        }
+
+        if existing_url == incoming_url:
+            raise ClientError(
+                "SOURCE_GROUP_DUPLICATE_URL",
+                "同一主题中已存在相同信源URL的来源组",
+                details,
+            )
+
+        if _source_content_key(existing_records) == incoming_key:
+            raise ClientError(
+                "SOURCE_GROUP_DUPLICATE_CONTENT",
+                "同一主题中已存在业务内容相同的来源组",
+                details,
+            )
 
 
 def validate_source_payload(payload: dict) -> list[dict[str, str]]:
@@ -223,6 +280,7 @@ class DatasetService:
                 records = validate_source_payload(payload)
                 if records[0]["主题"] != topic["主题"]:
                     raise ClientError("SOURCE_TOPIC_MISMATCH", "来源组主题与目标主题不一致")
+                _reject_duplicate_source_group(topic, records)
                 index = self._insert_index(
                     topic["source_groups"], "source_group_id", before_id, after_id
                 )
