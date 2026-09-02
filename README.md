@@ -10,6 +10,14 @@
 python -m pip install -e ./skills/researching-industry-chains
 ```
 
+`industry-chain` 是安装后的人工快捷入口。研究 Agent 在仓库内执行任务时优先使用当前 checkout 的本地入口，避免 PATH 中残留旧安装版本：
+
+```text
+python skills/researching-industry-chains/run_cli.py --help
+```
+
+如果 `industry-chain runner create --help` 与当前源码或文档不一致，以项目本地入口为准，不要因为旧安装缺少参数而改用其它业务流程；需要刷新全局快捷入口时重新执行上面的 editable install。
+
 `SKILL.md`、Client 源码、Schema 和安装配置位于同一个独立 Skill 包`skills/researching-industry-chains/`。外部 Agent 需要具备互联网搜索、可操作网页和 PDF 的浏览器、截图或高分辨率渲染、实际视觉读图以及调用本地 CLI 的能力。
 
 ## 主题输入
