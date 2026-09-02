@@ -8,7 +8,7 @@ from typing import Callable
 from uuid import uuid4
 
 from .errors import ClientError
-from .identity import load_catalog
+from .identity import TopicIdentity, load_catalog
 from .storage import RunnerStore
 
 
@@ -135,13 +135,41 @@ class RunnerService:
             "failed_topics": failed_topics,
         }
 
-    def create(self, name: str, config_path: Path) -> dict:
-        """读取配置快照并创建独立 Runner。"""
+    def create(
+        self,
+        name: str,
+        config_path: Path | None = None,
+        topic: str | None = None,
+    ) -> dict:
+        """从主题配置或单个主题创建独立 Runner。"""
         if not isinstance(name, str) or not name.strip():
             raise ClientError("RUNNER_NAME_INVALID", "任务名称不能为空")
-        catalog = load_catalog(config_path)
+        if (config_path is None) == (topic is None):
+            raise ClientError(
+                "RUNNER_TOPIC_SOURCE_INVALID",
+                "创建 Runner 时必须且只能提供 config 或 topic 其中一个",
+            )
+
+        if config_path is not None:
+            catalog = load_catalog(config_path)
+            topic_identity_path = str(config_path.resolve())
+        else:
+            if not isinstance(topic, str) or not topic.strip():
+                raise ClientError("TOPIC_INVALID", "单主题名称不能为空")
+            topic_name = topic.strip()
+            catalog = [
+                TopicIdentity(
+                    topic=topic_name,
+                    path=(topic_name,),
+                    aliases=(),
+                    order=1,
+                )
+            ]
+            topic_identity_path = None
+
         if not catalog:
             raise ClientError("TOPIC_CONFIG_INVALID", "主题身份配置中没有主题")
+
         now = self._now()
         local_now = now.astimezone()
         safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "-", name.strip())
@@ -153,7 +181,7 @@ class RunnerService:
         state = {
             "runner_id": runner_id,
             "name": name.strip(),
-            "topic_identity_path": str(config_path.resolve()),
+            "topic_identity_path": topic_identity_path,
             "created_at": timestamp,
             "updated_at": timestamp,
             "topics": [
