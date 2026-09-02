@@ -45,15 +45,33 @@ def _source_content_key(
     )
 
 
+def _original_source_name(source: str) -> str | None:
+    """从规范信源主体中提取原始研究主体。"""
+    value = source.strip()
+    if value.endswith("）"):
+        start = value.rfind("（")
+        if start >= 0:
+            original = value[start + 1 : -1].strip()
+            if original == "原始主体未明" or not original:
+                return None
+            return original
+    return value or None
+
+
 def _reject_duplicate_source_group(
     topic: dict,
     records: list[dict[str, str]],
+    exclude_group_id: str | None = None,
 ) -> None:
-    """拒绝同一主题中 URL 或业务内容完全重复的来源组。"""
+    """拒绝同一主题中 URL 重复或同原始主体业务内容重复的来源组。"""
     incoming_url = records[0]["信源URL"]
     incoming_key = _source_content_key(records)
+    incoming_original_source = _original_source_name(records[0]["信源主体"])
 
     for group in topic["source_groups"]:
+        if group["source_group_id"] == exclude_group_id:
+            continue
+
         existing_records = [row["record"] for row in group["rows"]]
         if not existing_records:
             continue
@@ -71,10 +89,18 @@ def _reject_duplicate_source_group(
                 details,
             )
 
-        if _source_content_key(existing_records) == incoming_key:
+        existing_original_source = _original_source_name(
+            existing_records[0]["信源主体"]
+        )
+        if (
+            incoming_original_source
+            and existing_original_source
+            and incoming_original_source == existing_original_source
+            and _source_content_key(existing_records) == incoming_key
+        ):
             raise ClientError(
                 "SOURCE_GROUP_DUPLICATE_CONTENT",
-                "同一主题中已存在业务内容相同的来源组",
+                "同一主题中已存在同原始主体且业务内容相同的来源组",
                 details,
             )
 
@@ -109,6 +135,19 @@ def validate_source_payload(payload: dict) -> list[dict[str, str]]:
             raise ClientError(
                 "SOURCE_GROUP_METADATA_MISMATCH", f"来源组内{field}必须一致"
             )
+    return records
+
+
+def _validate_source_group_for_topic(
+    topic: dict,
+    payload: dict,
+    exclude_group_id: str | None = None,
+) -> list[dict[str, str]]:
+    """统一校验来源组结构、父主题一致性和同主题重复。"""
+    records = validate_source_payload(payload)
+    if records[0]["主题"] != topic["主题"]:
+        raise ClientError("SOURCE_TOPIC_MISMATCH", "来源组主题与目标主题不一致")
+    _reject_duplicate_source_group(topic, records, exclude_group_id)
     return records
 
 
@@ -170,7 +209,12 @@ class DatasetService:
             raise ClientError("POSITION_CONFLICT", "before_id 与 after_id 不能同时使用")
 
     @staticmethod
-    def _insert_index(items: list[dict], id_field: str, before_id: str | None, after_id: str | None) -> int:
+    def _insert_index(
+        items: list[dict],
+        id_field: str,
+        before_id: str | None,
+        after_id: str | None,
+    ) -> int:
         """计算同级列表中的确定插入位置。"""
         if not before_id and not after_id:
             return len(items)
@@ -277,10 +321,7 @@ class DatasetService:
                 self._authorize(topic, claim_token, now)
                 if topic["status"] == "no_qualified_source":
                     raise ClientError("TOPIC_TERMINAL_DATA_CONFLICT", "无合格来源主题必须先重开")
-                records = validate_source_payload(payload)
-                if records[0]["主题"] != topic["主题"]:
-                    raise ClientError("SOURCE_TOPIC_MISMATCH", "来源组主题与目标主题不一致")
-                _reject_duplicate_source_group(topic, records)
+                records = _validate_source_group_for_topic(topic, payload)
                 index = self._insert_index(
                     topic["source_groups"], "source_group_id", before_id, after_id
                 )
@@ -291,11 +332,17 @@ class DatasetService:
                 ]
                 if before_id or after_id:
                     target = next(
-                        (item for item in ordered if item["source_group_id"] == (before_id or after_id)),
+                        (
+                            item
+                            for item in ordered
+                            if item["source_group_id"] == (before_id or after_id)
+                        ),
                         None,
                     )
                     if target is None or target not in topic["source_groups"]:
-                        raise ClientError("POSITION_TARGET_NOT_FOUND", "位置目标必须属于同一主题")
+                        raise ClientError(
+                            "POSITION_TARGET_NOT_FOUND", "位置目标必须属于同一主题"
+                        )
                     target_index = ordered.index(target)
                     ordered.insert(target_index if before_id else target_index + 1, group)
                 else:
@@ -314,7 +361,11 @@ class DatasetService:
                 row = self._new_rows([record], timestamp)[0]
                 group["rows"].insert(index, row)
                 self._renumber(group["rows"])
-                validate_source_payload(self._rows_payload(group))
+                _validate_source_group_for_topic(
+                    topic,
+                    self._rows_payload(group),
+                    group["source_group_id"],
+                )
                 group["updated_at"] = timestamp
                 result = row
             else:
@@ -324,7 +375,12 @@ class DatasetService:
 
         return self.store.mutate_dataset(runner_id, mutation)
 
-    def _build_topic(self, payload: dict, timestamp: str, node_id: str | None = None) -> dict:
+    def _build_topic(
+        self,
+        payload: dict,
+        timestamp: str,
+        node_id: str | None = None,
+    ) -> dict:
         """从主题载荷构造主题状态对象。"""
         allowed = {"主题", "path", "aliases", "source_groups"}
         if not isinstance(payload, dict) or set(payload) - allowed:
@@ -334,9 +390,13 @@ class DatasetService:
         aliases = payload.get("aliases", [])
         if not isinstance(topic_name, str) or not topic_name:
             raise ClientError("TOPIC_PAYLOAD_INVALID", "主题名称不能为空")
-        if not isinstance(path, list) or any(not isinstance(value, str) for value in path):
+        if not isinstance(path, list) or any(
+            not isinstance(value, str) for value in path
+        ):
             raise ClientError("TOPIC_PAYLOAD_INVALID", "主题 path 必须是字符串数组")
-        if not isinstance(aliases, list) or any(not isinstance(value, str) for value in aliases):
+        if not isinstance(aliases, list) or any(
+            not isinstance(value, str) for value in aliases
+        ):
             raise ClientError("TOPIC_PAYLOAD_INVALID", "主题 aliases 必须是字符串数组")
         topic = {
             "node_id": node_id or f"node_{uuid4().hex[:12]}",
@@ -350,9 +410,7 @@ class DatasetService:
             "source_groups": [],
         }
         for group_payload in payload.get("source_groups", []):
-            records = validate_source_payload(group_payload)
-            if records[0]["主题"] != topic_name:
-                raise ClientError("SOURCE_TOPIC_MISMATCH", "来源组主题与目标主题不一致")
+            records = _validate_source_group_for_topic(topic, group_payload)
             topic["source_groups"].append(self._new_group(records, timestamp))
         return topic
 
@@ -381,10 +439,16 @@ class DatasetService:
                 new_aliases = changes.get("aliases", topic["aliases"])
                 if not isinstance(new_name, str) or not new_name:
                     raise ClientError("TOPIC_PAYLOAD_INVALID", "主题名称不能为空")
-                if not isinstance(new_path, list) or any(not isinstance(value, str) for value in new_path):
+                if not isinstance(new_path, list) or any(
+                    not isinstance(value, str) for value in new_path
+                ):
                     raise ClientError("TOPIC_PAYLOAD_INVALID", "主题 path 必须是字符串数组")
-                if not isinstance(new_aliases, list) or any(not isinstance(value, str) for value in new_aliases):
-                    raise ClientError("TOPIC_PAYLOAD_INVALID", "主题 aliases 必须是字符串数组")
+                if not isinstance(new_aliases, list) or any(
+                    not isinstance(value, str) for value in new_aliases
+                ):
+                    raise ClientError(
+                        "TOPIC_PAYLOAD_INVALID", "主题 aliases 必须是字符串数组"
+                    )
                 topic["主题"] = new_name
                 topic["path"] = copy.deepcopy(new_path)
                 topic["aliases"] = copy.deepcopy(new_aliases)
@@ -398,15 +462,23 @@ class DatasetService:
                 topic, group = self._find_group(state, target_id)
                 self._authorize(topic, claim_token, now)
                 if set(changes) - {"主题", "信源主体", "信源URL", "备注"}:
-                    raise ClientError("PATCH_FIELD_INVALID", "来源组 Patch 包含无效字段")
+                    raise ClientError(
+                        "PATCH_FIELD_INVALID", "来源组 Patch 包含无效字段"
+                    )
                 for row_index, row in enumerate(group["rows"]):
                     for field in ("主题", "信源主体", "信源URL"):
                         if field in changes:
                             row["record"][field] = changes[field]
                     if "备注" in changes:
-                        row["record"]["备注"] = changes["备注"] if row_index == 0 else ""
+                        row["record"]["备注"] = (
+                            changes["备注"] if row_index == 0 else ""
+                        )
                     row["updated_at"] = timestamp
-                validate_source_payload(self._rows_payload(group))
+                _validate_source_group_for_topic(
+                    topic,
+                    self._rows_payload(group),
+                    group["source_group_id"],
+                )
                 group["updated_at"] = timestamp
                 result = group
             elif scope == "row":
@@ -415,7 +487,11 @@ class DatasetService:
                 if set(changes) - set(row["record"]):
                     raise ClientError("PATCH_FIELD_INVALID", "数据行 Patch 包含无效字段")
                 row["record"].update(changes)
-                validate_source_payload(self._rows_payload(group))
+                _validate_source_group_for_topic(
+                    topic,
+                    self._rows_payload(group),
+                    group["source_group_id"],
+                )
                 row["updated_at"] = timestamp
                 group["updated_at"] = timestamp
                 result = row
@@ -447,13 +523,21 @@ class DatasetService:
                 row["record"] = copy.deepcopy(record)
                 row["created_at"] = old_created
                 row["updated_at"] = timestamp
-                validate_source_payload(self._rows_payload(group))
+                _validate_source_group_for_topic(
+                    topic,
+                    self._rows_payload(group),
+                    group["source_group_id"],
+                )
                 group["updated_at"] = timestamp
                 result = row
             elif scope == "source_group":
                 topic, group = self._find_group(state, target_id)
                 self._authorize(topic, claim_token, now)
-                records = validate_source_payload(payload)
+                records = _validate_source_group_for_topic(
+                    topic,
+                    payload,
+                    group["source_group_id"],
+                )
                 group["rows"] = self._new_rows(records, timestamp)
                 group["updated_at"] = timestamp
                 result = group
@@ -466,11 +550,24 @@ class DatasetService:
                 replacement["last_error"] = topic["last_error"]
                 replacement["claim"] = topic["claim"]
                 if replacement["status"] == "completed" and not replacement["source_groups"]:
-                    raise ClientError("TOPIC_TERMINAL_DATA_CONFLICT", "完成主题必须保留至少一个来源组")
-                if replacement["status"] == "no_qualified_source" and replacement["source_groups"]:
-                    raise ClientError("TOPIC_TERMINAL_DATA_CONFLICT", "无合格来源主题不能包含来源组")
+                    raise ClientError(
+                        "TOPIC_TERMINAL_DATA_CONFLICT",
+                        "完成主题必须保留至少一个来源组",
+                    )
+                if (
+                    replacement["status"] == "no_qualified_source"
+                    and replacement["source_groups"]
+                ):
+                    raise ClientError(
+                        "TOPIC_TERMINAL_DATA_CONFLICT",
+                        "无合格来源主题不能包含来源组",
+                    )
                 old_orders = [group["order"] for group in topic["source_groups"]]
-                start_order = min(old_orders) if old_orders else len(self._ordered_groups(state)) + 1
+                start_order = (
+                    min(old_orders)
+                    if old_orders
+                    else len(self._ordered_groups(state)) + 1
+                )
                 index = state["topics"].index(topic)
                 state["topics"][index] = replacement
                 other_groups = [
@@ -507,17 +604,27 @@ class DatasetService:
                 topic, group, row = self._find_row(state, target_id)
                 self._authorize(topic, claim_token, now)
                 if len(group["rows"]) == 1:
-                    raise ClientError("REMOVE_SOURCE_GROUP_REQUIRED", "删除最后一行时应删除整个来源组")
+                    raise ClientError(
+                        "REMOVE_SOURCE_GROUP_REQUIRED",
+                        "删除最后一行时应删除整个来源组",
+                    )
                 group["rows"].remove(row)
                 self._renumber(group["rows"])
-                validate_source_payload(self._rows_payload(group))
+                _validate_source_group_for_topic(
+                    topic,
+                    self._rows_payload(group),
+                    group["source_group_id"],
+                )
                 group["updated_at"] = timestamp
                 result = {"removed_id": target_id, "scope": scope}
             elif scope == "source_group":
                 topic, group = self._find_group(state, target_id)
                 self._authorize(topic, claim_token, now)
                 if topic["status"] == "completed" and len(topic["source_groups"]) == 1:
-                    raise ClientError("TOPIC_TERMINAL_DATA_CONFLICT", "完成主题必须保留至少一个来源组")
+                    raise ClientError(
+                        "TOPIC_TERMINAL_DATA_CONFLICT",
+                        "完成主题必须保留至少一个来源组",
+                    )
                 topic["source_groups"].remove(group)
                 self._renumber(self._ordered_groups(state))
                 result = {"removed_id": target_id, "scope": scope}
