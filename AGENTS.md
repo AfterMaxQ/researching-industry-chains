@@ -6,6 +6,8 @@
 
 项目不绑定 Agent SDK。创建 Runner 时可以传入外部 `topic_identity.yaml` 批量创建主题快照，也可以直接传入一个正式主题创建单主题 Runner。批量模式保存配置中的正式主题、`path`、`aliases` 和顺序；单主题模式使用该主题本身作为 `path`，`aliases` 为空。Runner 创建后只使用内部主题快照，后续外部配置变化不影响已有批次。执行产业链检索时遵守 `skills/researching-industry-chains/SKILL.md`，本文件定义稳定业务边界。
 
+新任务默认新建 Runner。除非用户明确要求继续、续跑或补跑某个已有 Runner，或明确提供 `runner_id`，研究 Agent 不得扫描 `runs/` 寻找同主题历史结果，也不得复用已有 JSON、XLSX、来源组或历史搜索结果。续跑时只使用用户指定的 Runner，不自行选择其它同主题 Runner。
+
 ## 九字段与行语义
 
 每条记录固定包含九个字符串字段：
