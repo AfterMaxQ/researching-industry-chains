@@ -183,6 +183,15 @@ Runner Picker 是本地 Web 的第一层入口，同时承担 Runner 生命周�
 
 Runner 默认按最近活跃时间倒序排列。
 
+“已闭环主题”明确指 topic 终态为：
+
+```text
+completed
+no_qualified_source
+```
+
+`failed`、`awaiting_review`、`in_progress` 和 `pending` 均不计入闭环数量。
+
 每张 Runner 卡展示：
 
 - Runner 名称；
@@ -590,7 +599,12 @@ Agent 已发现该来源需要交互式浏览。
 
 右栏集中展示是否“交回 AI 继续”。
 
-没有合法草稿时“修正后通过”必须 disabled；人工若希望直接构造完整数据，需要先进入明确的人工编辑流程，而不能用空 records 通过。
+v1 无草稿状态不提供从空白开始手工构建完整产业链的入口；此时可执行的业务决策为：
+
+- `交回 AI 继续`；
+- `驳回来源`。
+
+因此 `draft_records=[]` 时“修正后通过”必须 disabled。纯人工从零构建来源若未来确有需求，应作为独立能力设计，不能用空 records 绕过正式来源校验。
 
 ---
 
@@ -880,7 +894,9 @@ Web 不负责领取或执行 Agent work。
 
 ### 16.3 Human 入口
 
-Web 使用 FastAPI 调用 ReviewService、RunnerService 和只读查询接口。
+Web 是人工审核的标准 UX 入口，使用 FastAPI 调用 ReviewService、RunnerService 和只读查询接口。
+
+底层 CLI 可以保留与 Service 等价的审核业务命令，用于 Agent 协议、测试或调试；但前端不通过 subprocess 调 CLI，正常人工审核流程也不要求用户手敲命令。
 
 前端只提交业务动作，例如：
 
@@ -1246,7 +1262,7 @@ Chip Explorer 类 review：
 - `draft_records=[]` 能正常显示；
 - 页面明确说明 Agent 已完成什么、卡在哪里；
 - “修正后通过”不可直接使用；
-- 人可“交回 AI 继续”；
+- 人可“交回 AI 继续”或驳回来源；
 - UI 明确说明 override 只作用当前 review / URL / reason。
 
 ### Case E：再次送审
@@ -1357,6 +1373,7 @@ working-copy state
 - 数据库迁移；
 - 回收站；
 - 多人协同审核；
+- 从 `draft_records=[]` 开始纯人工构建完整来源；
 - Dark Mode。
 
 ---
@@ -1366,8 +1383,8 @@ working-copy state
 v1 的前端和本地 Web 必须始终守住以下边界：
 
 1. **Runner 是工作空间边界。**
-2. **Agent 只通过 CLI 领取任务。**
-3. **Human 只通过 Web 提交审核业务动作。**
+2. **Agent 的标准任务入口是 CLI。**
+3. **Human 的标准审核体验入口是 Web；CLI 与 Web 可共享等价 Service 业务动作。**
 4. **CLI 与 Web 共用同一套 Python Service。**
 5. **Runner JSON 是唯一任务事实源。**
 6. **XLSX 只投影正式 source_groups。**
