@@ -262,6 +262,8 @@ def validate_source_result(payload: dict) -> dict:
 
 def strip_uncertainties(chain: list[dict]) -> list[dict]:
     """移除审核字段，生成可进入正式来源组的 Tree。"""
+    _validate_nodes(chain, depth=1, allow_uncertainties=True)
+
     def clean(node: dict) -> dict:
         result = {"name": node["name"]}
         if node.get("companies"):
