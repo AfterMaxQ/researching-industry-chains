@@ -9,7 +9,9 @@ from .dataset import DatasetService
 from .errors import ClientError
 from .identity import get_identity, search_identities
 from .runner import RunnerService
+from .source_service import SourceService
 from .storage import RunnerStore
+from .work import WorkService
 
 
 def _identity_dict(identity) -> dict:
@@ -70,29 +72,30 @@ def build_parser() -> argparse.ArgumentParser:
     topic_get = topic_commands.add_parser("get", help="读取主题")
     _add_runner_id(topic_get)
     topic_get.add_argument("--node-id", required=True)
-    topic_claim_next = topic_commands.add_parser("claim-next", help="领取下一主题")
-    _add_runner_id(topic_claim_next)
-    topic_claim = topic_commands.add_parser("claim", help="领取指定主题")
-    _add_runner_id(topic_claim)
-    topic_claim.add_argument("--node-id", required=True)
-    topic_claim.add_argument("--reopen", action="store_true")
-    topic_renew = topic_commands.add_parser("renew", help="续期主题租约")
-    _add_runner_id(topic_renew)
-    topic_renew.add_argument("--node-id", required=True)
-    topic_renew.add_argument("--claim-token", required=True)
-    topic_finish = topic_commands.add_parser("finish", help="提交主题终态")
-    _add_runner_id(topic_finish)
-    topic_finish.add_argument("--node-id", required=True)
-    topic_finish.add_argument("--claim-token", required=True)
-    topic_finish.add_argument(
-        "--outcome", choices=("completed", "no_qualified_source"), required=True
-    )
-    topic_fail = topic_commands.add_parser("fail", help="记录主题失败")
-    _add_runner_id(topic_fail)
-    topic_fail.add_argument("--node-id", required=True)
-    topic_fail.add_argument("--claim-token", required=True)
-    topic_fail.add_argument("--code", required=True)
-    topic_fail.add_argument("--message", required=True)
+
+    work = commands.add_parser("work", help="领取或结束 Agent 工作")
+    work_commands = work.add_subparsers(dest="action", required=True)
+    work_claim = work_commands.add_parser("claim-next", help="领取下一份工作")
+    _add_runner_id(work_claim)
+    work_claim.add_argument("--worker-label")
+    work_done = work_commands.add_parser("done", help="结束 topic 自动搜索阶段")
+    _add_runner_id(work_done)
+    work_done.add_argument("--work-id", required=True)
+    work_done.add_argument("--claim-token", required=True)
+    work_fail = work_commands.add_parser("fail", help="记录工作执行异常")
+    _add_runner_id(work_fail)
+    work_fail.add_argument("--work-id", required=True)
+    work_fail.add_argument("--claim-token", required=True)
+    work_fail.add_argument("--code", required=True)
+    work_fail.add_argument("--message", required=True)
+
+    source = commands.add_parser("source", help="提交完整 SourceResult")
+    source_commands = source.add_subparsers(dest="action", required=True)
+    source_submit = source_commands.add_parser("submit", help="提交来源研究结果")
+    _add_runner_id(source_submit)
+    source_submit.add_argument("--work-id", required=True)
+    source_submit.add_argument("--claim-token", required=True)
+    source_submit.add_argument("--input", required=True)
 
     dataset = commands.add_parser("dataset", help="管理交付数据")
     dataset_commands = dataset.add_subparsers(dest="action", required=True)
@@ -140,6 +143,8 @@ def dispatch(args: argparse.Namespace) -> object:
     store = RunnerStore(args.runs_root)
     runner = RunnerService(store)
     dataset = DatasetService(store)
+    work = WorkService(store)
+    source = SourceService(store)
 
     if args.command == "identity":
         if args.action == "get":
@@ -170,22 +175,26 @@ def dispatch(args: argparse.Namespace) -> object:
             ]
         if args.action == "get":
             return dataset.get(args.runner_id, "topic", args.node_id)
+
+    if args.command == "work":
         if args.action == "claim-next":
-            return runner.claim_next(args.runner_id)
-        if args.action == "claim":
-            return runner.claim(args.runner_id, args.node_id, args.reopen)
-        if args.action == "renew":
-            return runner.renew(args.runner_id, args.node_id, args.claim_token)
-        if args.action == "finish":
-            return runner.finish(
-                args.runner_id, args.node_id, args.claim_token, args.outcome
-            )
-        return runner.fail(
+            return work.claim_next(args.runner_id, args.worker_label)
+        if args.action == "done":
+            return work.done(args.runner_id, args.work_id, args.claim_token)
+        return work.fail(
             args.runner_id,
-            args.node_id,
+            args.work_id,
             args.claim_token,
             args.code,
             args.message,
+        )
+
+    if args.command == "source":
+        return source.submit(
+            args.runner_id,
+            args.work_id,
+            args.claim_token,
+            _read_input(args.input),
         )
 
     if args.action == "get":
@@ -225,6 +234,8 @@ def dispatch(args: argparse.Namespace) -> object:
 
 def main(argv: list[str] | None = None) -> int:
     """运行 CLI，并只向标准输出写入统一 JSON 响应。"""
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8")
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     parser = build_parser()
