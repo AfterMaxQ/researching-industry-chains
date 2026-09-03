@@ -225,6 +225,8 @@ def dispatch(args: argparse.Namespace) -> object:
 
 def main(argv: list[str] | None = None) -> int:
     """运行 CLI，并只向标准输出写入统一 JSON 响应。"""
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
