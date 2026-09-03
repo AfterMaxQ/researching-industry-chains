@@ -267,6 +267,24 @@ class DatasetService:
             "rows": self._new_rows(records, timestamp),
         }
 
+    def insert_source_group_in_state(
+        self,
+        state: dict,
+        topic: dict,
+        payload: dict,
+        timestamp: str,
+    ) -> dict:
+        """在已有 Runner 事务中校验并追加正式来源组。"""
+        records = _validate_source_group_for_topic(topic, payload)
+        group = self._new_group(records, timestamp)
+        topic["source_groups"].append(group)
+        ordered = [
+            item for item in self._ordered_groups(state) if item is not group
+        ]
+        ordered.append(group)
+        self._renumber(ordered)
+        return group
+
     def get(self, runner_id: str, scope: str, target_id: str) -> dict:
         """读取指定作用域对象的一致快照。"""
         state = self.store.read(runner_id)
@@ -321,16 +339,25 @@ class DatasetService:
                 self._authorize(topic, claim_token, now)
                 if topic["status"] == "no_qualified_source":
                     raise ClientError("TOPIC_TERMINAL_DATA_CONFLICT", "无合格来源主题必须先重开")
-                records = _validate_source_group_for_topic(topic, payload)
-                index = self._insert_index(
-                    topic["source_groups"], "source_group_id", before_id, after_id
-                )
-                group = self._new_group(records, timestamp)
-                topic["source_groups"].insert(index, group)
-                ordered = [
-                    item for item in self._ordered_groups(state) if item is not group
-                ]
-                if before_id or after_id:
+                if not before_id and not after_id:
+                    group = self.insert_source_group_in_state(
+                        state, topic, payload, timestamp
+                    )
+                else:
+                    records = _validate_source_group_for_topic(topic, payload)
+                    index = self._insert_index(
+                        topic["source_groups"],
+                        "source_group_id",
+                        before_id,
+                        after_id,
+                    )
+                    group = self._new_group(records, timestamp)
+                    topic["source_groups"].insert(index, group)
+                    ordered = [
+                        item
+                        for item in self._ordered_groups(state)
+                        if item is not group
+                    ]
                     target = next(
                         (
                             item
@@ -342,12 +369,10 @@ class DatasetService:
                     if target is None or target not in topic["source_groups"]:
                         raise ClientError(
                             "POSITION_TARGET_NOT_FOUND", "位置目标必须属于同一主题"
-                        )
+                    )
                     target_index = ordered.index(target)
                     ordered.insert(target_index if before_id else target_index + 1, group)
-                else:
-                    ordered.append(group)
-                self._renumber(ordered)
+                    self._renumber(ordered)
                 result = group
             elif scope == "row":
                 if not parent_id:
