@@ -23,23 +23,24 @@ v1 定位为**单机 localhost 研究审核工作台**，不是多人 SaaS，也
 1. 用户先选择一个 Runner，再进入该 Runner 的独立工作空间。
 2. 工作台、待审核、任务进度和已完成均限定在当前 Runner。
 3. 审核页必须清楚显示：**当前待审核来源属于哪个主题、来源是什么、真实证据是什么、Agent 草稿是什么、为什么被送审、哪些位置不可靠。**
-4. 简单 review 可在 Queue 中快速查看和处理，复杂 review 再进入 Full Review Workbench。
+4. Quick Review 只用于快速查看、采用、驳回或交回 AI；**所有产业链结构编辑统一进入 Full Review**。
 5. Full Review 采用 **Evidence-first** 心智：左侧原始来源证据，中间产业链草稿，右侧审核处理。
 6. 有产业链图时直接展示原图或必要的局部图，可点击放大；没有图时展示真正支持审核的正文 / 表格 / 交互证据。
 7. **不使用正文摘要代替证据。** 人工审核需要来源原始证据，不需要 AI 再概括一遍文章。
 8. 产业链树 + 企业归属是主要编辑模型，九字段 records 是底层业务协议，不是主要 UI。
 9. 人工可修改、增加、删除节点和企业，也可修正企业挂载关系。
-10. `focus_items` 只表示**需要人工注意的不确定点 / 定位点**，不表示 Agent 向人提出的问题，也不携带问卷式候选答案。
-11. 人工决策发生在 review 级：采用当前结果、修正后通过、交回 AI 继续、驳回来源。
-12. `draft_records=[]` 仍是合法 review，但 v1 不允许从空白开始纯人工构建完整来源。
-13. `交回 AI 继续` 只作用当前 review_item / 当前 URL / 当前 reason，不建立域名规则。
-14. Runner 页面能观察 Codex / Claude Code / Trae 等 Agent 主窗口当前 work，但 Web 不负责 Agent 调度。
-15. Web 与 CLI 必须共用同一套 Python Service、RunnerStore、锁和状态机。
-16. v1 保持轻量：无账号、无数据库、无 WebSocket、无消息队列。
+10. 节点必须支持拖拽改变同级顺序，也支持拖到其他父节点下；节点移动时整棵子树递归跟随。
+11. `focus_items` 只表示**需要人工注意的不确定点 / 定位点**，不表示 Agent 向人提出的问题，也不携带问卷式候选答案。
+12. 人工决策发生在 review 级：采用当前结果、修正后通过、交回 AI 继续、驳回来源。
+13. `draft_records=[]` 仍是合法 review，但 v1 不允许从空白开始纯人工构建完整来源。
+14. `交回 AI 继续` 只作用当前 review_item / 当前 URL / 当前 reason，不建立域名规则。
+15. Runner 页面能观察 Codex / Claude Code / Trae 等 Agent 主窗口当前 work，但 Web 不负责 Agent 调度。
+16. Web 与 CLI 必须共用同一套 Python Service、RunnerStore、锁和状态机。
+17. v1 保持轻量：无账号、无数据库、无 WebSocket、无消息队列。
 
 最终体验目标：
 
-> Agent 已经完成大部分研究与结构化工作；人打开审核页后，能直接对照真实证据和当前草稿，看到哪里不可靠，需要修改就直接修改，不需要修改就直接采用结果。
+> Agent 已经完成大部分研究与结构化工作；人打开审核页后，能直接对照真实证据和当前草稿，看到哪里不可靠，需要修改就进入 Full Review 直接改，不需要修改就直接采用结果。
 
 ---
 
@@ -62,7 +63,10 @@ v1 明确不做：
 - 回收站；
 - 从 `draft_records=[]` 开始纯人工构造完整产业链；
 - 针对某个站点写专用前端或 parser 特例；
-- 把审核做成 Agent 问问题、人选择答案的问卷系统。
+- 把审核做成 Agent 问问题、人选择答案的问卷系统；
+- 在 Quick Review 里维护第二套 Tree 编辑器；
+- 用户头像、个人中心、通知中心、权限菜单等用户模块；
+- 知识库、数据源管理、Agent 管理、统计分析等与 v1 审核主流程无关的后台模块。
 
 ---
 
@@ -74,10 +78,10 @@ v1 明确不做：
 Runner Picker
     ↓
 Runner Workspace
-    ├─ 工作台
+    ├─ 工作台（极简概览）
     ├─ 待审核
-    │   ├─ Quick Review
-    │   └─ Full Review Workbench
+    │   ├─ Quick Review（只读）
+    │   └─ Full Review Workbench（唯一 Tree 编辑入口）
     ├─ 任务进度
     └─ 已完成
 ```
@@ -225,19 +229,29 @@ UI 优先告诉人：
 
 Runner Picker 默认按最近活跃时间倒序。
 
-“已闭环”只包括：
+### 6.1 “已完成”统计口径
+
+前端统一使用用户可读文案：
+
+> **已完成**
+
+不再使用“已闭环”。
+
+Runner 级“已完成”数量包含已经结束、不再需要继续处理的两种 topic 终态：
 
 ```text
 completed
 no_qualified_source
 ```
 
-`pending / in_progress / awaiting_review / failed` 不计入闭环数量。
+`pending / in_progress / awaiting_review / failed` 不计入 Runner 级“已完成”数量。
+
+单个 `no_qualified_source` topic 在详情中仍可显示“无合格来源”，只是计入 Runner 的“已完成 / 总主题”。
 
 Runner 卡展示：
 
 - Runner 名称；
-- 已闭环 / 总主题；
+- 已完成 / 总主题；
 - 整体进度；
 - 待审核；
 - AI 处理中；
@@ -246,13 +260,13 @@ Runner 卡展示：
 - 进入入口；
 - `...` 菜单。
 
-### 6.1 Runner 切换
+### 6.2 Runner 切换
 
 进入 Workspace 后，左上角始终提供 Runner selector。
 
 浏览器可以保存 `last_runner_id` 作为本地便利设置，但该信息不属于 Runner 业务状态。
 
-### 6.2 Runner 删除
+### 6.3 Runner 删除
 
 Runner 支持永久删除，不做回收站。
 
@@ -287,22 +301,29 @@ Runner 支持永久删除，不做回收站。
 切换 Runner
 ```
 
-### 7.1 工作台
+### 7.1 工作台：只保留薄概览
 
-回答：
+工作台只回答：
 
 > 当前 Runner 里，我现在需要关心什么？
 
-只展示有工作价值的指标：
+它不能演变成第二个任务进度页或老板 Dashboard。
+
+顶部只展示四个工作指标：
 
 - 待人工审核；
 - AI 处理中；
 - 已交回 AI；
-- 今日闭环。
+- 今日完成。
 
-待审核卡必须优先展示：主题、来源、送审原因、不确定点数量、是否已有草稿和下一步动作。
+主体最多展示：
 
-不做老板驾驶舱式无关指标。
+- 最近 3 条待审核来源；
+- 最近几条业务活动。
+
+待审核卡只显示：主题、来源、送审原因、focus item 数量、是否有草稿和“进入审核”。
+
+不展示趋势图、环比、企业总数、模型成功率、审核效率等非核心指标。
 
 ---
 
@@ -339,17 +360,17 @@ Runner 支持永久删除，不做回收站。
 
 Quick Preview 只显示当前 focus item 必要的上下文：
 
-- 相关的产业链局部树；
+- 相关产业链局部树的**只读预览**；
 - 相关来源证据入口；
 - 当前 focus item 的送审说明。
 
-若审核必须阅读大图、多个证据、完整树或改变结构，应升级到 Full Review。
+如果需要改变任何节点、顺序、父子关系或企业归属，必须进入 Full Review。
 
-### 8.3 Quick Review
+### 8.3 Quick Review：严格只读
 
-Quick Review **不生成问题和候选答案**。
+Quick Review **不生成问题和候选答案，也不编辑 Tree**。
 
-例如企业归属存在不确定时，右侧应展示：
+例如企业归属存在不确定时，右侧展示：
 
 ```text
 审核处理
@@ -373,11 +394,17 @@ Quick Review **不生成问题和候选答案**。
 [采用当前结果]
 ```
 
-如果审核员认为草稿正确，可以直接采用当前结果；如果需要改节点、关系或企业归属，进入 Full Review 或直接使用共享 Tree 编辑能力修正，再执行“修正后通过”。
+Quick Review 的可执行动作只有：
+
+- 查看关联证据；
+- 打开完整审核；
+- 采用当前结果（已有草稿且无需修改）；
+- 交回 AI 继续；
+- 驳回来源。
+
+它不维护未提交 Tree working copy，不实现节点拖拽、节点新增、企业重挂等编辑能力。
 
 `focus_item` 在 Quick Review 中只是定位和阅读顺序，不要求人工逐项回答或保存“答案”。
-
-Quick Review 和 Full Review 必须共享同一份浏览器 working copy。
 
 v1 不提供批量通过。
 
@@ -387,7 +414,9 @@ v1 不提供批量通过。
 
 ### 9.1 核心心智
 
-Full Review 的三个核心对象固定为：
+Full Review 是**唯一产业链 Tree 编辑入口**。
+
+三个核心对象固定为：
 
 ```text
 来源证据 | 产业链草稿 | 审核处理
@@ -647,7 +676,7 @@ human_answer
 
 ## 12. 产业链草稿区
 
-Tree View 是正式审核主界面。
+Tree View 是 Full Review 的正式编辑主界面。
 
 展示规则：
 
@@ -658,26 +687,105 @@ Tree View 是正式审核主界面。
 - 切换 focus item 时自动定位对应区域；
 - 不使用“答对 / 已回答 / 已确认第 N 题”之类问答状态。
 
-### 12.1 编辑能力
+### 12.1 节点编辑能力
 
 人工可：
 
 - 重命名节点；
-- 添加同级 / 子节点；
+- 添加根节点；
+- 添加同级节点；
+- 添加子节点；
 - 删除节点；
-- 修改父子关系；
-- 添加 / 删除企业；
+- 修改节点父子关系；
+- 拖拽改变同级节点顺序；
+- 拖拽节点到另一个父节点下；
+- 增加 Agent 完全遗漏的节点。
+
+### 12.2 拖拽与递归语义
+
+节点拖拽必须明确区分两种动作：
+
+**A. 同一父节点内排序**
+
+```text
+父节点
+├─ A
+├─ B
+└─ C
+```
+
+把 `C` 拖到 `A` 前面后：
+
+```text
+父节点
+├─ C
+├─ A
+└─ B
+```
+
+只改变同级顺序，不改变父子关系。
+
+**B. 移动到新的父节点**
+
+如果节点本身有子节点：
+
+```text
+A
+└─ B
+   ├─ C
+   └─ D
+```
+
+把 `B` 拖到 `X` 下时，必须移动**整棵 B 子树**：
+
+```text
+X
+└─ B
+   ├─ C
+   └─ D
+```
+
+不能只移动 B 而把 C / D 留在原位置。
+
+节点 reparent 后：
+
+- 该节点及全部后代的 root-to-node 路径递归更新；
+- 对应九字段 records 的 `分类1 ~ 分类4` 投影随新路径重新生成；
+- 后代企业继续跟随其原所属节点，不需要逐个重新挂载；
+- 当前 Tree 中的显示顺序成为 approve 时 records 的稳定输出顺序基础。
+
+拖拽必须防止非法循环：
+
+- 节点不能拖到自己下面；
+- 节点不能拖到自己的任意后代下面；
+- 超出正式四层分类能力的 drop 必须被拒绝并给出清楚反馈。
+
+### 12.3 企业编辑能力
+
+人工可：
+
+- 添加企业；
+- 删除企业；
 - 将企业移动到其他节点；
 - 将企业设为无法归属；
-- 增加 Agent 完全遗漏的节点或企业。
-
-节点移动可以支持拖拽，但必须同时提供确定性的父节点选择方式。
+- 增加 Agent 完全遗漏的企业。
 
 企业移动使用节点搜索器，不要求用户直接编辑 `分类1` ~ `分类4`。
 
-### 12.2 Inspector
+### 12.4 Inspector
 
 点击节点或企业时使用右侧 Inspector / 编辑区，不使用阻断式大 Modal。
+
+节点 Inspector 至少能：
+
+- 修改节点名称；
+- 查看当前路径；
+- 选择新的父节点；
+- 添加同级 / 子节点；
+- 查看企业；
+- 删除节点。
+
+父节点选择器与拖拽 reparent 使用同一语义：改变父节点时整棵子树递归跟随。
 
 右侧只有一个区域：
 
@@ -686,6 +794,8 @@ Tree View 是正式审核主界面。
 - Inspector 关闭后回到当前 focus item 的审核处理。
 
 不额外增加第四栏。
+
+对于含子节点的删除操作，UI 必须明确提示影响范围，不能静默丢失子树。
 
 ---
 
@@ -754,7 +864,7 @@ Tree View 是正式审核主界面。
 - 人工修改摘要（如有）；
 - 将写入正式 source_group；
 - XLSX 将刷新；
-- 当前 review 将闭环。
+- 当前 review 将完成。
 
 ### 14.2 驳回来源
 
@@ -792,9 +902,9 @@ review_item.draft_records
         ↓
 前端 records → tree
         ↓
-浏览器 working copy
+Full Review 浏览器 working copy
         ↓
-Tree / Inspector 编辑
+Tree / Inspector 编辑、排序、reparent
         ↓
 前端 tree → records
         ↓
@@ -805,11 +915,23 @@ ReviewService approve
 
 九字段 records 仍是业务协议；Tree 只是 UI 投影。
 
+### 15.1 顺序投影
+
+九字段 schema 没有额外的 `node_order` 字段，因此 v1 不新增第二套顺序事实源。
+
+Full Review Tree 中人工确定的节点顺序，在 `tree → records` 时通过稳定的树遍历顺序投影到 records 行顺序：
+
+- 父节点先于其后代；
+- 同级节点按当前 Tree 顺序输出；
+- 移动整棵子树后，该子树作为整体出现在新的顺序位置。
+
+这样既保留人工调整后的展示顺序，也不新增业务字段。
+
 人工编辑不采用“每改一个节点就写 Runner”。一次审核最终一次性提交完整 records，由 ReviewService 做原子校验与写入。
 
-Quick Review 和 Full Review 使用同一个 working copy。
+Quick Review 不创建可编辑 working copy；只有进入 Full Review 后才创建 / 恢复 Tree working copy。
 
-可以使用浏览器本地存储恢复未提交草稿，key 至少包含：
+可以使用浏览器本地存储恢复 Full Review 未提交草稿，key 至少包含：
 
 ```text
 runner_id + review_item_id + review_version
@@ -906,14 +1028,20 @@ Runner 永久删除时，其 evidence assets 一并删除。
 
 展示：
 
-- 已闭环 / 总主题；
-- 已完成；
+- 已完成 / 总主题；
 - AI 处理中；
 - 待人工审核；
 - 等待处理；
 - 执行异常。
 
-人类可读状态：
+其中顶部“已完成”统计口径与 Runner Picker 一致，包含：
+
+```text
+completed
+no_qualified_source
+```
+
+单个 topic 仍使用更具体的状态：
 
 ```text
 pending             → 等待处理
@@ -930,7 +1058,9 @@ failed              → 执行异常
 等待处理 | AI处理中 | 待人工 | 已完成
 ```
 
-不允许拖卡改变状态。
+`no_qualified_source` 可以放在“已完成”列中，以“无合格来源”作为卡片子状态。
+
+不允许拖卡改变 topic 状态。
 
 Agent Work 展示 `worker_label` 仅作观察，不参与调度。
 
@@ -955,6 +1085,11 @@ Activity Feed 只展示极简业务事实，不做完整审计日志。
 - 查看来源；
 - 查看 review 处理记录；
 - 查看最终结果。
+
+“已完成”页可以同时包含：
+
+- 正常有正式 source_group 的 `completed` topic；
+- 以“无合格来源”标识的 `no_qualified_source` topic。
 
 不做审核绩效排行榜和复杂分析。
 
@@ -1079,7 +1214,7 @@ expected_version
 
 推荐 HTTP：`409 Conflict`。
 
-列表和 Runner 进度可以后台刷新，但正在编辑的 review 不允许自动覆盖 working copy；发现服务器 version 变化时只提示“已有新版本”。
+列表和 Runner 进度可以后台刷新，但正在编辑的 Full Review 不允许自动覆盖 working copy；发现服务器 version 变化时只提示“已有新版本”。
 
 ---
 
@@ -1142,10 +1277,9 @@ Vite
 
 原因：
 
-- Queue 有局部工作状态；
-- Full Review 有 Evidence viewer、Tree editor、Inspector；
-- Quick / Full Review 共用 working copy；
-- 需要快捷键、Lightbox、局部刷新和版本冲突处理。
+- Queue 有局部查看状态；
+- Full Review 有 Evidence viewer、Tree editor、拖拽排序 / reparent、Inspector；
+- 需要 Lightbox、局部刷新和版本冲突处理。
 
 生产环境：
 
@@ -1187,6 +1321,15 @@ FastAPI 挂载静态文件
 - 不伪造占位内容；
 - 不因此把 review 自动判定通过或失败。
 
+### 非法节点拖拽
+
+例如把节点拖到自身后代下，或拖动后超过四层分类能力：
+
+- drop 不生效；
+- Tree 保持原状；
+- 给出简短原因；
+- 不产生半完成 working copy。
+
 ### Runner 删除冲突
 
 存在 active work 时拒绝删除，并展示当前 work。
@@ -1221,12 +1364,27 @@ worker_label = Codex / Claude Code / Trae
 ### Case A：Runner 选择与删除
 
 - 多 Runner 可搜索、进入和切换；
+- Runner 卡使用“已完成 / 总主题”，不显示“已闭环”；
 - Workspace 始终限定当前 Runner；
 - 无 active work 时可永久删除 Runner；
 - 有 active work 时删除被拒绝；
 - JSON、XLSX 和当前 Runner evidence assets 一并删除。
 
-### Case B：主题上下文
+### Case B：工作台保持极简
+
+- 只展示待人工、AI 处理中、已交回 AI、今日完成；
+- 只展示少量最近待审核和最近活动；
+- 不出现趋势图、用户模块、知识库、数据源管理、统计分析等额外后台功能。
+
+### Case C：Quick Review 只读
+
+- 可以查看局部 Tree、证据和送审原因；
+- 可以采用当前结果、交回 AI、驳回或进入 Full Review；
+- 不能新增 / 删除 / 拖拽节点；
+- 不能重挂企业；
+- 不维护 Tree working copy。
+
+### Case D：主题上下文
 
 进入任何 review：
 
@@ -1235,7 +1393,7 @@ worker_label = Codex / Claude Code / Trae
 - 可打开原始来源；
 - 审核员不需要从 URL 或 Runner 名猜主题。
 
-### Case C：图片证据
+### Case E：图片证据
 
 来源有产业链图：
 
@@ -1245,7 +1403,7 @@ worker_label = Codex / Claude Code / Trae
 - 可以放大、缩小和拖动；
 - 可以回到原来源。
 
-### Case D：正文证据
+### Case F：正文证据
 
 来源审核依赖正文：
 
@@ -1254,7 +1412,7 @@ worker_label = Codex / Claude Code / Trae
 - 不用“正文摘要”代替证据；
 - 可打开原文。
 
-### Case E：Evidence / Focus 联动
+### Case G：Evidence / Focus 联动
 
 一个 review 有多个 focus item：
 
@@ -1264,7 +1422,7 @@ worker_label = Codex / Claude Code / Trae
 - 不生成问题、候选答案或人工 answer 字段；
 - 人可以通过上一项 / 下一项浏览所有关注点。
 
-### Case F：采用当前结果
+### Case H：采用当前结果
 
 Agent draft 已存在，人工查看证据后认为无需修改：
 
@@ -1274,16 +1432,45 @@ Agent draft 已存在，人工查看证据后认为无需修改：
 - ReviewService 校验通过后进入正式 source_group；
 - XLSX 刷新。
 
-### Case G：复杂 Tree 修正
+### Case I：节点新增与同级排序
+
+在 Full Review：
+
+- 可以新增根 / 同级 / 子节点；
+- 可以把同级节点通过拖拽改变顺序；
+- 不改变它们的父节点；
+- approve 后 records 行顺序稳定反映当前 Tree 顺序。
+
+### Case J：节点 reparent 与子树递归移动
+
+存在：
+
+```text
+A
+└─ B
+   ├─ C
+   └─ D
+```
+
+把 B 移到 X 下：
+
+- C / D 必须随 B 一起移动；
+- B / C / D 路径递归更新；
+- C / D 下企业仍留在原节点；
+- `分类1 ~ 分类4` 投影按新路径重新生成；
+- 禁止把 B 拖到 B 自己或 C / D 下形成环；
+- 超过四层的 drop 被拒绝。
+
+### Case K：复杂 Tree 修正
 
 - 可新增 / 删除 / 重命名节点；
-- 可改变父子关系；
+- 可改变父子关系和同级顺序；
 - 可新增 / 删除 / 重挂企业；
 - working copy 变化后主动作显示“修正后通过”；
 - 最终转换为九字段 records；
 - ReviewService 校验后进入正式 source_group 并刷新 XLSX。
 
-### Case H：无草稿交互来源
+### Case L：无草稿交互来源
 
 - `draft_records=[]` 正常展示；
 - 展示来源入口和 Agent 已确认的交互事实；
@@ -1292,20 +1479,20 @@ Agent draft 已存在，人工查看证据后认为无需修改：
 - “采用当前结果 / 修正后通过”不可使用；
 - 可交回 AI 或驳回。
 
-### Case I：再次送审
+### Case M：再次送审
 
 - 同一 URL 在人工放行后遇到新的不确定点，复用同一 review_item；
 - 页面明确显示这是新的送审关注点；
 - 旧 override 已消费；
 - 当前 evidence / focus 只突出新的不确定点。
 
-### Case J：版本冲突
+### Case N：版本冲突
 
 - 人打开 version 3，Agent 更新为 version 4；
 - version 3 提交不得覆盖 version 4；
 - UI 提醒加载最新结果。
 
-### Case K：本地启动
+### Case O：本地启动
 
 执行：
 
@@ -1346,7 +1533,7 @@ review queue
 review workbench
 source evidence viewer
 image lightbox
-shared tree editor
+tree editor / drag-drop
 review handling panel / inspector
 progress
 completed
@@ -1354,7 +1541,7 @@ API client
 working-copy state
 ```
 
-不要把 Evidence、Tree、API、Working Copy 和 Review Actions 全部堆进一个 React 大文件。
+不要把 Evidence、Tree、拖拽、API、Working Copy 和 Review Actions 全部堆进一个 React 大文件。
 
 ---
 
@@ -1380,23 +1567,28 @@ working-copy state
 ## 29. 最终设计原则
 
 1. **Runner 是工作空间边界。**
-2. **审核页必须先让人知道当前来源属于哪个主题。**
-3. **Evidence-first：原始证据不是 AI 摘要。**
-4. **有产业链图就直接展示，并可放大查看。**
-5. **没有图就展示真正支持审核的正文 / 表格 / 交互证据。**
-6. **Evidence、Tree、Focus Item 三者必须联动。**
-7. **Focus Item 是人工注意点 / 定位点，不是 Agent 向人的问题。**
-8. **审核处理不使用问卷式问题、选项或人工 answer。**
-9. **需要修改时直接编辑产业链 Tree；不需要修改时直接采用当前结果。**
-10. **采用当前结果与修正后通过共用同一个 approve 业务动作。**
-11. **产业链 Tree 是 UI；九字段 records 才是底层业务协议。**
-12. **待审核数据不提前进入正式 source_groups / XLSX。**
-13. **人工编辑使用 working copy，最终一次性提交。**
-14. **review evidence 只保存当前人工审核真正需要的最小证据，不演变成 Evidence DB。**
-15. **Agent 标准任务入口是 CLI；Human 标准审核入口是 Web。**
-16. **CLI 与 Web 共用同一套 Python Service。**
-17. **Web 不直接 PATCH 内部状态，也不直接修改 runner.json。**
-18. **版本冲突必须显式失败，不能静默覆盖。**
-19. **localhost v1 不为未来多人场景提前增加基础设施。**
-20. **视觉语言统一采用暖色、克制、专业的 Warm Editorial Research Workbench。**
-21. **最终目标是让人围绕真实证据修正或采用整个来源结果，而不是回答 Agent 出的题。**
+2. **用户侧统一使用“已完成”，不使用“已闭环”。**
+3. **工作台只是薄概览，不做第二套 Dashboard。**
+4. **Quick Review 严格只读；所有产业链编辑统一进入 Full Review。**
+5. **审核页必须先让人知道当前来源属于哪个主题。**
+6. **Evidence-first：原始证据不是 AI 摘要。**
+7. **有产业链图就直接展示，并可放大查看。**
+8. **没有图就展示真正支持审核的正文 / 表格 / 交互证据。**
+9. **Evidence、Tree、Focus Item 三者必须联动。**
+10. **Focus Item 是人工注意点 / 定位点，不是 Agent 向人的问题。**
+11. **审核处理不使用问卷式问题、选项或人工 answer。**
+12. **需要修改时直接编辑产业链 Tree；不需要修改时直接采用当前结果。**
+13. **节点可新增、同级排序和 reparent；父节点移动时整棵子树递归跟随。**
+14. **拖拽后的节点路径和 records 投影必须一致，且必须阻止循环和超过四层的非法结构。**
+15. **采用当前结果与修正后通过共用同一个 approve 业务动作。**
+16. **产业链 Tree 是 UI；九字段 records 才是底层业务协议。**
+17. **待审核数据不提前进入正式 source_groups / XLSX。**
+18. **人工编辑使用 working copy，最终一次性提交。**
+19. **review evidence 只保存当前人工审核真正需要的最小证据，不演变成 Evidence DB。**
+20. **Agent 标准任务入口是 CLI；Human 标准审核入口是 Web。**
+21. **CLI 与 Web 共用同一套 Python Service。**
+22. **Web 不直接 PATCH 内部状态，也不直接修改 runner.json。**
+23. **版本冲突必须显式失败，不能静默覆盖。**
+24. **localhost v1 不为未来多人场景提前增加基础设施。**
+25. **视觉语言统一采用暖色、克制、专业的 Warm Editorial Research Workbench。**
+26. **最终目标是让人围绕真实证据修正或采用整个来源结果，而不是回答 Agent 出的题。**
