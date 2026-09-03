@@ -2,7 +2,7 @@
 
 ## 项目定位与职责
 
-本项目提供独立、跨 Agent 的产业链检索与交付数据客户端。研究 Agent 负责搜索、浏览器操作、视觉读图、来源资格、主题一致性、产业链树和企业归属；Client 只负责主题快照、租约、确定性校验、稳定 ID、原子修改、JSON 持久化和 XLSX 投影。
+本项目提供独立、跨 Agent 的产业链检索、Human-in-the-loop 审核与交付数据客户端。研究 Agent 负责搜索、浏览器操作、视觉读图、来源资格、主题一致性、产业链 Tree 和企业归属，并只提交 SourceResult；Client 负责主题快照、租约、SourceResult/Tree 确定性校验、Tree 到九字段编译、稳定 ID、审核状态机、原子修改、JSON 持久化和 XLSX 投影。
 
 项目不绑定 Agent SDK。创建 Runner 时可以传入外部 `topic_identity.yaml` 批量创建主题快照，也可以直接传入一个正式主题创建单主题 Runner。批量模式保存配置中的正式主题、`path`、`aliases` 和顺序；单主题模式使用该主题本身作为 `path`，`aliases` 为空。Runner 创建后只使用内部主题快照，后续外部配置变化不影响已有批次。执行产业链检索时遵守 `skills/researching-industry-chains/SKILL.md`，本文件定义稳定业务边界。
 
@@ -18,15 +18,15 @@
 主题、信源主体、分类1、分类2、分类3、分类4、公司、信源URL、备注
 ```
 
-一行表示“从根节点到当前节点的完整路径”以及直接归属于路径终点的企业集合，不是一家企业一行，也不能把整棵产业链压成一行。每个可读独立节点都单独成行，包括父节点和无企业节点；同一父节点下的并列子节点不得合并。
+一行表示“从根节点到当前节点的完整路径”以及直接归属于路径终点的企业集合，不是一家企业一行，也不能把整棵产业链压成一行。Client 从 Tree 按父节点优先的深度优先顺序生成每个可读节点的行，包括父节点和无企业节点；同一父节点下的并列子节点不得合并。
 
-先根据来源中的框、分组标题、连接关系、缩进、包含关系和阅读方向还原产业链树，再投影为行；不得先建立标准产业链再套入来源内容。分类1至分类3填写路径前三层；第四级及更深层级按原始顺序合并到分类4，如 `第四级 > 第五级`。分类必须连续。节点名称、层级和顺序保持来源原义，不标准化、不润色、不用行业知识补全；组合节点原样保留，并列节点拆行，省略号和装饰文字不生成节点。
+先根据来源中的框、分组标题、连接关系、缩进、包含关系和阅读方向还原产业链 Tree，再由 Client 投影为行；不得先建立标准产业链再套入来源内容。Tree 最多四层，超过四层拒绝提交或人工修改，不把第五级及以后合并进分类4。分类必须连续。节点名称、层级和顺序保持来源原义，不标准化、不润色、不用行业知识补全；组合节点原样保留，并列节点拆行，省略号和装饰文字不生成节点。
 
-公司只写在直接证据支持的最小节点行。证据只到父节点时只挂父节点，不向子节点继承；无法确认归属时公司留空，不删除节点、不猜测挂载，并在来源组首行备注。相同路径的企业去重后按来源出现顺序用顿号连接；节点文字相同但完整父路径不同时分别保留。来源组按原图阅读顺序排列，父节点行放在子节点行之前。
+企业只写入直接证据支持的最小节点 `companies: string[]`。证据只到父节点时只挂父节点，不向子节点继承；无法确认归属时不删除节点、不猜测挂载，可在最终 description 中说明。Client 按当前数组顺序用顿号合并同一节点企业；节点文字相同但完整父路径不同时分别保留。
 
 公司字段保存企业实体名称；“旗下的、所属、由……控股、代表企业为”等关系文字只作为归属证据，不进入公司名称。只能识别原文简称或品牌时仍保留原文，不调用外部知识补全企业工商全称。
 
-主题使用 Runner 快照中的正式名称。信源主体按发布关系填写。信源 URL 必须是产生本组节点和企业证据的同一来源地址。备注只允许来源组第一行填写。
+主题使用 Runner 快照中的正式名称。`source.name` 按发布关系填写，`source.url` 必须是产生本组节点和企业证据的同一来源地址。`description` 同时是来源说明和最终来源组第一行备注，不维护 `remark`、`summary` 或 `source_note`。
 
 ## 来源资格与证据
 
@@ -53,13 +53,25 @@
 
 ## Client 与 Runner 边界
 
-写入载荷只允许：
+Agent 通过 `source submit` 提交完整 SourceResult：
+
+```json
+{"outcome":"accept","source":{"name":"","url":"https://example.com"},"description":"","chain":[]}
+```
+
+`outcome` 只有 `accept` 和 `review`。`accept` 的 chain 非空、至少有一家企业，且任何位置都不能包含 uncertainty；`review` 可使用空 chain，但整个 SourceResult 至少有一个 uncertainty。uncertainty 就地挂在来源根级或节点内；企业 uncertainty 使用当前节点路径加 company 定位。Evidence 可省略或包含多条，每条只保存 `locator + description`，不建设截图资产、Evidence DB 或图片服务。
+
+Agent-facing 命令只包括 `work claim-next`、`source submit`、topic work 结束时的 `work done` 和异常时的 `work fail`。Agent 不输出九字段、内部 ID、状态、version、events、stage 或 reason。`work done` 只表示自动搜索完成，Client 推导 topic 状态；review work 在一次 `source submit` 后结束。
+
+`accept` 经 SourceResult/Tree 校验后由 Client 编译为九字段，再复用 DatasetService 校验并在同一事务中写入 Runner JSON 和 XLSX。`review` 只创建或更新 review_item，不进入正式 `source_groups` 和 XLSX。人工通过时提交最终 description、chain 和 expected_version，Client 再执行同一正式写入流程。人工交回 AI 后，Agent 的下一次 SourceResult 更新同一个 review_item，不创建 review 链。
+
+低层 `dataset get|insert|patch|replace|remove` 保留为人工精确维护接口。其九字段载荷固定为：
 
 ```json
 {"records":[{"主题":"","信源主体":"","分类1":"","分类2":"","分类3":"","分类4":"","公司":"","信源URL":"","备注":""}]}
 ```
 
-Client 只做确定性校验，不判断主题相关性、节点层级或企业真实性。来源组内主题、信源主体和 URL 必须一致，分类不能断层，只有首行可写备注，至少一行公司非空，URL 必须可生成超链接。任何会改变来源组最终内容的 `insert、patch、replace` 和行删除操作，都必须再次确认来源组主题与父主题一致，并执行同主题重复检查。
+Client 不判断主题相关性、产业链语义或企业真实性；只做 SourceResult/Tree、九字段、父主题一致性和重复来源等确定性校验。来源组内主题、信源主体和 URL 必须一致，分类不能断层，只有首行可写备注，至少一行公司非空，URL 必须可生成超链接。
 
 Client 只在**同一 Runner、同一正式主题**内做确定性重复检查：
 
@@ -70,11 +82,11 @@ Client 只在**同一 Runner、同一正式主题**内做确定性重复检查�
 
 原始信源主体按 `原始主体`、`发布平台（原始主体）` 的规范格式确定；`发布平台（原始主体未明）` 不参与内容指纹判重。企业集合比较忽略顿号分隔后的书写顺序。该去重不使用行业语义、模糊相似度、embedding、模型判断，也不跨 Runner 查询历史数据。Client 不自动合并来源或企业。
 
-每个来源完整解析后一次原子写入，不能边读边逐行提交。Client 支持 `get、insert、patch、replace、remove`，作用域为 `topic、source_group、row`；内部 ID、时间和顺序不进入九列 XLSX。Runner JSON 是事实源，XLSX 只是交付投影；状态修改只更新 Runner JSON，业务数据修改必须同时原子更新 JSON 和 XLSX。
+每个来源完整解析后一次提交完整 SourceResult，不能边读边逐节点写入。低层 DatasetService 的三种作用域仍为 `topic、source_group、row`；内部 ID、时间、审核数据和顺序不进入九列 XLSX。Runner JSON 是事实源，XLSX 只投影正式来源；业务数据修改必须同时原子更新 JSON 和 XLSX。
 
-主题状态为 `pending、in_progress、completed、no_qualified_source、failed`，`remaining` 统计 `pending + failed`。自动处理只领取 `pending`；失败主题由明确补跑领取。`in_progress` 主题的数据修改和终态操作必须携带有效 `claim_token`；合法数据写入续租，有效租约不能被其他 Agent 重复领取，过期后可重新领取并生成新令牌。
+主题状态为 `pending、in_progress、awaiting_review、completed、no_qualified_source、failed`。`work claim-next` 优先领取 `returned_to_agent` review，再恢复过期 review/topic，最后领取 pending topic。合法 `source submit` 续租；有效租约不能被其它 Agent 重复领取，过期后生成新令牌。
 
-`completed` 必须至少有一个来源组，`no_qualified_source` 必须没有来源组。终态可显式重开；审核修改不得破坏状态与来源组数量的一致性。每个 Runner 只保存 `runner.json` 和 `<runner_id>_交付数据.xlsx`，不同 Runner 完全隔离。
+topic 自动搜索结束后：存在开放 review 时为 `awaiting_review`；无开放 review 且有正式来源时为 `completed`；无开放 review 且无正式来源时为 `no_qualified_source`。review 状态为 `pending_review、returned_to_agent、in_agent、approved、rejected`；人工动作使用整数 version 做乐观并发检查。每个 Runner 只保存 `runner.json` 和 `<runner_id>_交付数据.xlsx`，不同 Runner 完全隔离。
 
 ## 项目范围与验收
 
@@ -82,4 +94,4 @@ Client 只在**同一 Runner、同一正式主题**内做确定性重复检查�
 
 Python 标识符、第三方库和 CLI 命令使用兼容的英文名称；文档、Skill、注释、docstring、错误信息、测试名称和用户可见内容使用中文。文档只描述当前项目和稳定规则，不记录会话过程、修改历史、旧版本比较或路线图。
 
-验收以实际行为为准：外部主题配置或单主题输入都可创建主题快照；并发领取不会产生两个有效持有者；来源组能够原子写入；同主题确定性重复来源不会通过后续修改重新制造；三种作用域的五种操作可精确修改；状态与数据约束一致；XLSX 只有九个业务列，保留来源顺序并将 URL 生成为超链接。
+验收以实际行为为准：外部主题配置或单主题输入都可创建主题快照；统一 work 调度不会产生两个有效持有者；accept SourceResult 能原子编译并写入正式来源与 XLSX；review 不会在批准前泄漏进 XLSX；同一个 review_item 可交回 Agent 并用完整 SourceResult 更新；人工 version 冲突不会静默覆盖；Tree/九字段/XLSX 任一步失败都不留下半个来源组；XLSX 只有九个业务列并将 URL 生成为超链接。
