@@ -58,7 +58,7 @@ def _review_view(review: dict) -> dict:
     }
 
 
-def _find_work(state: dict, work_id: str) -> tuple[str, dict, dict | None]:
+def find_work(state: dict, work_id: str) -> tuple[str, dict, dict | None]:
     """按 work_id 查找 topic 或 review。"""
     for topic in state["topics"]:
         if topic["node_id"] == work_id:
@@ -177,7 +177,7 @@ class WorkService:
         now = self._now()
 
         def mutation(state: dict) -> dict:
-            work_type, topic, review = _find_work(state, work_id)
+            work_type, topic, review = find_work(state, work_id)
             if work_type == "review":
                 raise ClientError(
                     "WORK_DONE_NOT_ALLOWED",
@@ -214,7 +214,7 @@ class WorkService:
         timestamp = now.isoformat()
 
         def mutation(state: dict) -> dict:
-            work_type, topic, review = _find_work(state, work_id)
+            work_type, topic, review = find_work(state, work_id)
             error = {"code": code.strip(), "message": message.strip()}
             if work_type == "topic":
                 require_and_renew_claim(topic, claim_token, now)

@@ -112,6 +112,33 @@ class ReviewService:
         reviews.append(review)
         return copy.deepcopy(review)
 
+    def replace_from_agent_in_state(
+        self,
+        review: dict,
+        source_result: dict,
+        timestamp: str,
+    ) -> dict:
+        """用 Agent 的最新完整 SourceResult 更新同一个 review_item。"""
+        validated = validate_source_result(source_result)
+        if validated["outcome"] != "review":
+            raise ClientError(
+                "SOURCE_RESULT_NOT_REVIEW",
+                "只有 review 类型 SourceResult 可以更新待审核对象",
+            )
+        review["status"] = "pending_review"
+        review["source"] = copy.deepcopy(validated["source"])
+        review["description"] = validated["description"]
+        review["chain"] = copy.deepcopy(validated["chain"])
+        review["uncertainties"] = copy.deepcopy(
+            validated.get("uncertainties", [])
+        )
+        review["agent_claim"] = None
+        review.pop("last_error", None)
+        review["version"] += 1
+        review["updated_at"] = timestamp
+        append_review_event(review, "review_resubmitted", timestamp)
+        return copy.deepcopy(review)
+
     def approve(
         self,
         runner_id: str,
