@@ -433,6 +433,8 @@ class DatasetService:
             "last_error": None,
             "claim": None,
             "source_groups": [],
+            "auto_phase_finished": False,
+            "review_items": [],
         }
         for group_payload in payload.get("source_groups", []):
             records = _validate_source_group_for_topic(topic, group_payload)
@@ -574,6 +576,12 @@ class DatasetService:
                 replacement["status"] = topic["status"]
                 replacement["last_error"] = topic["last_error"]
                 replacement["claim"] = topic["claim"]
+                replacement["auto_phase_finished"] = topic.get(
+                    "auto_phase_finished", False
+                )
+                replacement["review_items"] = copy.deepcopy(
+                    topic.get("review_items", [])
+                )
                 if replacement["status"] == "completed" and not replacement["source_groups"]:
                     raise ClientError(
                         "TOPIC_TERMINAL_DATA_CONFLICT",

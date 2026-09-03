@@ -17,10 +17,29 @@ RENEW_INTERVAL_SECONDS = 1200
 STATUSES = (
     "pending",
     "in_progress",
+    "awaiting_review",
     "completed",
     "no_qualified_source",
     "failed",
 )
+OPEN_REVIEW_STATUSES = {"pending_review", "returned_to_agent", "in_agent"}
+
+
+def refresh_topic_status(topic: dict) -> str:
+    """在自动搜索结束后，根据正式来源和开放审核推导主题状态。"""
+    if not topic.get("auto_phase_finished"):
+        return topic["status"]
+    has_open_review = any(
+        review.get("status") in OPEN_REVIEW_STATUSES
+        for review in topic.get("review_items", [])
+    )
+    if has_open_review:
+        topic["status"] = "awaiting_review"
+    elif topic.get("source_groups"):
+        topic["status"] = "completed"
+    else:
+        topic["status"] = "no_qualified_source"
+    return topic["status"]
 
 
 def new_claim(token: str, now: datetime) -> dict:
@@ -195,6 +214,8 @@ class RunnerService:
                     "last_error": None,
                     "claim": None,
                     "source_groups": [],
+                    "auto_phase_finished": False,
+                    "review_items": [],
                 }
                 for identity in catalog
             ],
