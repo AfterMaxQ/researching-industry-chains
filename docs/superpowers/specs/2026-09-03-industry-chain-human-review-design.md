@@ -2,262 +2,783 @@
 
 ## 1. 文档目的
 
-本文定义 `researching-industry-chains` 项目的 Human-in-the-loop（HITL）审核子系统 v1。
+本文定义 `researching-industry-chains` 的 Human-in-the-loop（HITL）审核系统。
 
-目标不是把现有产业链 Skill 改造成“所有结果都要人工确认”的半自动系统，而是在保留当前自动化能力的前提下，为 Agent 无法可靠闭环的边界来源提供一个明确、可恢复、可人工修正的处理通道。
+目标不是把 Agent 变成工作流工程师，而是在保留自动研究能力的前提下，为真正无法可靠闭环的来源提供人工审核通道。
 
 核心原则：
 
-> 正常来源继续自动通过；只有 Agent 主动判断为 `needs_review` 的边界来源进入人工审核。
+> **Agent 负责研究语义，Client 负责协议工程。**
 
-审核不是异常兜底页，而是正式业务流程的一部分。
+Agent 只负责找来源、读取来源、理解产业链、判断是否可靠完成，以及在需要审核时说明不确定点和审核依据。
 
----
+Client / Service 负责 Tree → 九字段、ID、状态机、租约、review_item、持久化、原子写入和 XLSX。
 
-## 2. 背景与问题
-
-现有 Skill 已能处理多种常见来源：
-
-- 普通网页正文；
-- 网页产业链图片；
-- PDF；
-- 表格；
-- 多张图；
-- 正文补充；
-- 企业归属；
-- 节点和企业覆盖；
-- 图文关系与冲突。
-
-但未来来源不可能被提前穷举。
-
-典型例子是：
-
-`https://chipexplorer.eto.tech/`
-
-该页面不是普通文章，也没有一张完整的产业链图或静态表格。其核心信息通过交互式 Supply Chain Explorer 展示，Agent 必须实际使用浏览器点击不同节点，观察页面状态变化，逐步获取完整产业链信息。
-
-如果系统只按“网页 / 图片 / PDF / 表格”等固定解析类型工作，就会不断增加特例，并且仍然无法覆盖新型数据源。
-
-因此 v1 不把问题定义为：
-
-> 这个来源属于哪一种已知 parser type？
-
-而定义为：
-
-> Agent 能否自主发现取得完整来源证据所需要的能力和操作，并可靠完成该 Retrieval Plan？
-
----
-
-## 3. 设计目标
-
-v1 需要解决以下问题：
-
-1. Agent 能识别自己是否已经可靠完成当前来源，而不是被迫输出答案。
-2. Agent 遇到新型来源时，应先主动探索，而不是因为“没见过”就立即送人工。
-3. 只有真正无法可靠闭环、且人工介入有机会解决的问题才进入审核。
-4. 人工审核对象是一篇来源 / 一个来源工作单元，而不是 Excel 单行。
-5. 人工能够直接修正 Agent 草稿，包括新增 Agent 完全遗漏的节点和企业。
-6. 人工认为“这里其实不需要人工判断”时，可以把当前 URL 一次性交回 Agent 继续。
-7. 人工退回来源必须能重新被 Codex、Claude Code、Trae 等主窗口 Agent 领取并继续处理。
-8. 调度、队列、状态机、租约和持久化全部由 CLI 负责，Agent 不自行调度。
-9. Runner JSON 继续作为事实源；XLSX 继续作为正式九字段交付投影。
-10. 不因为加入审核系统而引入数据库、消息队列、独立 Review DB、长期 Memory 或复杂 Agent SDK。
-
----
-
-## 4. 非目标
-
-v1 明确不做：
-
-- 所有自动结果都进入人工审核；
-- 自动学习并直接修改 `SKILL.md`；
-- 一次人工放行自动升级为整个域名白名单；
-- 独立数据库 / 向量数据库 / 审核数据库；
-- 完整审计平台；
-- 置信度打分体系；
-- Parser 类型注册中心；
-- 模型调用记录、token 统计、完整推理过程持久化；
-- 自动根据人工修改重训模型；
-- 人工审核结果被未来 AI 自动覆盖；
-- 为 Codex / Claude Code / Trae 分别维护业务实现分支。
-
-v1 只解决：**Agent 边界来源 → 人工判断 → 必要时返回 Agent → 最终正式数据**。
-
----
-
-## 5. 总体架构
-
-系统分为四个职责明确的部分。
+最终正式业务交付仍然是九字段 XLSX：
 
 ```text
-┌─────────────────────────────┐
-│ CLI / Runner                │
-│ 调度、状态机、租约、持久化 │
-└──────────────┬──────────────┘
-               │ 领取 Work Item
+主题
+信源主体
+分类1
+分类2
+分类3
+分类4
+公司
+信源URL
+备注
+```
+
+---
+
+## 2. 设计目标
+
+v1 需要做到：
+
+1. 正常合格来源继续自动写入，不强制人工确认。
+2. 明确不合格的搜索候选由 Agent 直接跳过，不进入 Runner。
+3. 只有有业务价值但无法可靠闭环的来源进入 HITL。
+4. Agent 不再直接展开九字段 records，而是提交产业链 Tree。
+5. Agent 不生成 `review_item_id`、`evidence_id`、`focus_item_id`、`stage`、`reason`、`status`、`version`、`events` 等内部协议字段。
+6. Agent 不重复提交 topic；当前主题由 work item / claim context 决定。
+7. 人工审核单位是来源，不是 Excel 单行。
+8. 人工可以直接修改 Tree 和来源说明，最终再由 Client 确定性投影为九字段。
+9. Runner JSON 继续作为任务事实源；XLSX 继续作为正式交付投影。
+10. 不引入数据库、消息队列、Evidence DB、长期 Memory、独立 Agent SDK 或复杂状态平台。
+
+---
+
+## 3. 总体架构
+
+```text
+┌──────────────────────────────┐
+│ CLI / Core Services          │
+│ 调度、状态机、租约、持久化  │
+└──────────────┬───────────────┘
+               │ work claim-next
                ▼
-┌─────────────────────────────┐
-│ Agent                       │
-│ Codex / Claude Code / Trae  │
-│ 按 Skill 执行业务任务       │
-└──────────────┬──────────────┘
-               │ 事实与结果
+┌──────────────────────────────┐
+│ Agent                        │
+│ Codex / Claude Code / Trae   │
+│ 搜索、浏览、判断、读图、建树│
+└──────────────┬───────────────┘
+               │ SourceResult
                ▼
-┌─────────────────────────────┐
-│ Runner JSON                 │
-│ source_groups + review_items│
-└──────────────┬──────────────┘
+┌──────────────────────────────┐
+│ SourceResult Compiler        │
+│ 校验、Tree→records、HITL编排 │
+└──────────────┬───────────────┘
                │
-      ┌────────┴────────┐
-      ▼                 ▼
-┌──────────────┐  ┌──────────────┐
-│ Web 审核端   │  │ XLSX         │
-│ 人工决策     │  │ 正式数据投影 │
-└──────────────┘  └──────────────┘
+      ┌────────┴─────────┐
+      ▼                  ▼
+formal source_group   review_item
+      │                  │
+      ▼                  ▼
+    XLSX              Web 审核
 ```
 
-职责定义：
+职责：
 
-- **CLI**：流水线调度器、状态机、租约管理器、持久化入口。
-- **Agent**：无状态执行器，只处理 CLI 当前领取的工作。
-- **Skill**：定义 Agent 如何搜索、Probe、解析、判断是否需要审核。
-- **Web 审核端**：只负责展示与提交人工业务动作，不自行维护 Runner 状态机。
-- **Runner JSON**：唯一任务事实源。
-- **XLSX**：只包含正式 `source_groups` 的九字段交付投影。
+- **Agent**：研究员，只输出业务语义。
+- **Skill**：告诉 Agent 如何搜索、Probe、解析、判断可靠性和提交 SourceResult。
+- **CLI / Core Service**：统一工作入口、状态机、租约、原子写入和错误处理。
+- **SourceResult Compiler**：把 Agent 的稀疏 Tree 编译成正式九字段或 review_item。
+- **Web**：展示、人工编辑和提交审核动作，不直接改 Runner 状态。
+- **Runner JSON**：任务事实源。
+- **XLSX**：正式九字段交付投影，只包含已经正式通过的来源。
 
 ---
 
-## 6. 核心架构原则
+## 4. Agent-facing SourceResult
 
-### 6.1 Agent 报告事实，CLI 推导状态
+### 4.1 只有 `accept` 和 `review`
 
-Agent 不应该决定：
-
-- 下一项任务是谁；
-- `returned_to_agent` 是否比普通 topic 优先；
-- topic 是否应该进入 `awaiting_review`；
-- topic 是否可以 `completed`；
-- review_item 应切换到哪个内部状态。
-
-Agent 只执行业务动作，例如：
-
-- 提交正式来源；
-- 提交 `needs_review`；
-- 完成当前自动阶段；
-- 完成人工退回来源；
-- 报告当前 work 失败。
-
-状态转换由 CLI Service 完成。
-
-### 6.2 source_groups 与 review_items 严格分离
-
-`source_groups` 表示已经成为正式交付数据的来源。
-
-`review_items` 表示尚未成为正式数据、需要人工或再次 Agent 处理的来源。
-
-因此：
-
-> 未审核的来源不得提前写入正式 `source_groups`。
-
-这保证 XLSX 永远只投影正式数据。
-
-### 6.3 人工审核单位是来源，不是 Excel 行
-
-一个来源对应：
+Agent 处理一个值得提交的来源时，只提交一种统一 SourceResult：
 
 ```text
-文章 / PDF / Explorer
-        ↓
-产业链结构
-        ↓
-节点
-        ↓
-企业归属
-        ↓
-多行九字段 records
+outcome = accept
+outcome = review
 ```
 
-因此审核主对象必须是 `review_item` / 来源级工作单元。
+明确不合格的搜索候选不提交给 Client，Agent 直接跳过并继续搜索。
 
-九字段 records 是数据协议，不是主要审核心智模型。
+不新增：
 
-### 6.4 人工是最终编辑者
+```text
+outcome = reject
+```
 
-人类不仅能确认 AI 草稿，还可以：
+搜索过程中的无关页面、新闻、无产业链内容页面等不成为 Runner 对象。
 
-- 修改节点名称；
-- 修改父子关系；
-- 新增节点；
+### 4.2 `accept`
+
+当 Agent 认为当前来源已经可靠闭环：
+
+```json
+{
+  "outcome": "accept",
+  "source": {
+    "name": "某研究院",
+    "url": "https://example.com/report"
+  },
+  "description": "该来源通过产业链图展示锡膏上游原材料、中游制造和下游应用，并明确列出部分节点对应企业。",
+  "chain": [
+    {
+      "name": "上游",
+      "children": [
+        {
+          "name": "锡粉",
+          "companies": ["华光新材", "康普锡威"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+规则：
+
+- `source.name` 必填；
+- `source.url` 必填；
+- `description` 必填，通常 1～3 句话；
+- `chain` 必须非空；
+- `accept` 中不允许存在任何来源级、节点级或企业级 uncertainty。
+
+### 4.3 `review`
+
+当来源有业务价值，但存在 Agent 无法可靠闭环的判断：
+
+```json
+{
+  "outcome": "review",
+  "source": {
+    "name": "某研究院",
+    "url": "https://example.com/report"
+  },
+  "description": "该来源能够确认主要产业链结构，但部分企业与具体节点的直接归属关系无法可靠确认。",
+  "chain": [
+    {
+      "name": "上游",
+      "children": [
+        {
+          "name": "锡粉",
+          "companies": ["华光新材"],
+          "uncertainties": [
+            {
+              "company": "华光新材",
+              "message": "当前企业归属缺少足够直接证据。",
+              "evidence": [
+                {
+                  "locator": "PDF 第17页 · 图5",
+                  "description": "图中出现华光新材，但与锡粉节点之间的直接连接不清楚。"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+`review` 允许 `chain` 为空，例如 Agent 已确认来源有价值，但当前无法形成可靠 Tree。
+
+`review` 必须至少存在一个 uncertainty，可以位于来源级或 Tree 内部。
+
+---
+
+## 5. 稀疏 Tree 协议
+
+### 5.1 节点结构
+
+Tree 节点统一使用对象，不混用字符串和对象。
+
+最小节点：
+
+```json
+{
+  "name": "上游"
+}
+```
+
+有企业时：
+
+```json
+{
+  "name": "锡粉",
+  "companies": ["华光新材", "康普锡威"]
+}
+```
+
+有子节点时：
+
+```json
+{
+  "name": "上游",
+  "children": [
+    {"name": "锡粉"},
+    {"name": "助焊剂"}
+  ]
+}
+```
+
+空数组允许省略：
+
+```text
+children: []
+companies: []
+uncertainties: []
+```
+
+Agent 不需要机械补齐。
+
+### 5.2 企业表达
+
+Tree 只表达：
+
+> 哪些企业直接属于当前节点。
+
+企业始终是独立字符串：
+
+```json
+"companies": ["华光新材", "康普锡威"]
+```
+
+不保存“企业组”层级，不使用二维数组。
+
+最终写 XLSX 时，Client 将同节点企业按当前顺序用 `、` 合并。
+
+### 5.3 Tree 顺序
+
+数组顺序就是来源中的业务顺序，也作为最终 records 的稳定输出顺序。
+
+Client 使用稳定 Tree traversal：
+
+```text
+父节点先于后代
+同级节点保持当前数组顺序
+整个子树作为一个连续块输出
+```
+
+不新增第二套 `node_order` 事实源。
+
+### 5.4 Tree 确定性校验
+
+Client 负责：
+
+- `name` 必须是非空字符串；
+- 最大正式分类深度为 4；
+- 同一父节点下拒绝完全相同的重复节点；
+- `companies` 中企业名必须非空；
+- `company` uncertainty 必须引用当前节点 `companies` 中已有企业；
+- `accept` 不得带 uncertainty；
+- `review` 至少存在一个 uncertainty；
+- 正式通过的来源最终至少存在一个企业。
+
+Agent 不需要先手工模拟这些校验。
+
+---
+
+## 6. 不确定性就地挂载
+
+不使用全局 `target` 字符串。
+
+原因：
+
+- `target` 可能是节点，也可能是企业；
+- 同一家企业可能出现在多个节点；
+- 仅靠名字无法唯一定位企业 occurrence。
+
+因此 uncertainty 直接挂在问题发生的位置。
+
+### 6.1 来源级 uncertainty
+
+属于整个来源的问题放在 SourceResult 根级：
+
+```json
+{
+  "message": "无法可靠确认是否已经遍历全部必要交互状态。",
+  "evidence": [
+    {
+      "locator": "Supply Chain Explorer → Materials → 展开子节点",
+      "description": "点击节点后业务内容变化，但页面没有完整节点总数。"
+    }
+  ]
+}
+```
+
+Client 自动理解为 source scope。
+
+### 6.2 节点级 uncertainty
+
+属于当前节点或当前结构关系的问题，放在节点内部，不填写 company：
+
+```json
+{
+  "name": "锡粉",
+  "uncertainties": [
+    {
+      "message": "无法确认锡粉与上级金属材料是否为直接父子关系。"
+    }
+  ]
+}
+```
+
+Client 通过递归位置天然知道完整节点路径。
+
+### 6.3 企业 occurrence uncertainty
+
+企业问题仍挂在所在节点，只额外填写企业名：
+
+```json
+{
+  "name": "锡粉",
+  "companies": ["华光新材"],
+  "uncertainties": [
+    {
+      "company": "华光新材",
+      "message": "无法可靠确认其直接属于当前锡粉节点。"
+    }
+  ]
+}
+```
+
+内部目标由 Client 确定为：
+
+```text
+节点路径 + 企业名
+```
+
+因此即使同一家企业出现在多个节点，也不会混淆。
+
+---
+
+## 7. Evidence：只保留定位和审核依据
+
+v1 不建设 Evidence Asset 系统。
+
+Evidence 只是帮助审核员快速找到来源位置并理解审核依据的轻量描述：
+
+```json
+{
+  "locator": "PDF 第17页 · 图5",
+  "description": "图中能看到华光新材，但与锡粉节点的直接关系不清晰。"
+}
+```
+
+字段：
+
+- `locator`：去哪里看；
+- `description`：为什么这里值得看、它支持或不能支持什么判断。
+
+一个 uncertainty 可以有多个 evidence，例如产业链结构证据与企业归属证据分别来自不同位置。
+
+允许 locator 使用自由文本，因为来源可能是：
+
+- PDF 页码 / 图号；
+- 正文段落；
+- 表格；
+- 网页某章节；
+- Canvas / SVG / 动态图；
+- 需要浏览器点击的交互状态。
+
+v1 不要求：
+
+- `evidence_id`；
+- `kind`；
+- `asset_ref`；
+- 图片 URL；
+- 截图文件名；
+- bounding box；
+- OCR；
+- 截图上传；
+- Evidence DB；
+- Evidence 目录；
+- Lightbox / 图片渲染 API。
+
+Agent 可以使用截图作为自己的视觉读取手段，但不需要把截图持久化为系统资产。
+
+---
+
+## 8. `description` 与 XLSX `备注`
+
+`description` 是来源级业务说明，也是最终九字段 `备注` 的来源内容。
+
+不再同时维护：
+
+```text
+description
+remark
+```
+
+规则：
+
+```text
+SourceResult.description
+        ↓
+Tree → records
+        ↓
+来源组第一行.备注 = description
+        ↓
+XLSX
+```
+
+Full Review 中人工可以修改 `description`。
+
+如果人工修改了 Tree，应允许同步修改来源说明，避免最终 Tree 与备注语义不一致。
+
+Client 不根据 Tree 自动重写自然语言 description，只保存最终人工确认版本。
+
+如果未来有确定性的必要补充，也应合并进同一最终备注，不新增第二个交付字段。
+
+---
+
+## 9. Tree → 九字段 Compiler
+
+Agent 不再直接输出九字段。
+
+Client 对 `accept` 或人工批准后的最终 Tree 做确定性投影。
+
+### 9.1 字段来源
+
+```text
+主题       ← 当前 work item 的 topic
+信源主体   ← source.name
+分类1~4    ← 当前节点 root-to-node path
+公司       ← 当前节点 companies 用 、 合并
+信源URL    ← source.url
+备注       ← description，仅来源组第一行填写
+```
+
+### 9.2 行生成
+
+每个可读节点都生成一行 root-to-node record，即使当前节点没有企业。
+
+例如：
+
+```text
+上游
+└─ 锡粉
+   ├─ 华光新材
+   └─ 康普锡威
+```
+
+投影为：
+
+```text
+分类1=上游，公司=""
+分类1=上游，分类2=锡粉，公司="华光新材、康普锡威"
+```
+
+### 9.3 正式写入复用 DatasetService
+
+Compiler 生成 records 后继续走现有确定性校验和原子来源组写入：
+
+```text
+SourceResult
+↓
+validate Tree
+↓
+Tree → records
+↓
+DatasetService validate
+↓
+原子写 Runner JSON
+↓
+刷新 XLSX
+```
+
+来源组九字段仍是最终正式业务协议；只是机械展开从 Agent 移到了 Client。
+
+---
+
+## 10. SourceResult 提交流程
+
+### 10.1 `accept`
+
+```text
+Agent source submit accept
+↓
+Client 校验 SourceResult / Tree
+↓
+Tree → 九字段
+↓
+DatasetService 原子写正式 source_group
+↓
+刷新 XLSX
+↓
+CLI 返回 accepted
+```
+
+### 10.2 `review`
+
+```text
+Agent source submit review
+↓
+Client 校验 SourceResult
+↓
+不写 source_group
+不写 XLSX
+↓
+创建或更新 review_item
+↓
+进入人工审核
+↓
+CLI 返回 queued_for_review
+```
+
+未经批准的 Tree 不属于正式交付数据。
+
+### 10.3 首次来源与交回 AI 使用同一个 `source submit`
+
+Agent 不学习两套协议。
+
+普通 topic work 与人工交回的 review work 最后都提交完整 SourceResult 快照。
+
+Client 根据当前 work context 自动判断：
+
+- 首次 `review`：创建 review_item；
+- review work 返回 `accept`：更新原 review_item、正式写入 source_group 并闭环；
+- review work 再次返回 `review`：更新同一个 review_item 的最新完整快照，重新进入人工审核。
+
+不因为反复交回 AI 创建 `review_01 → review_02 → review_03` 链。
+
+Agent 再次提交 `review` 时，只提交当前仍然存在的不确定性，不做 patch，也不需要显式 resolve 旧 uncertainty。
+
+---
+
+## 11. ReviewItem 内部模型
+
+review_item 保持轻量，不复制 Agent-facing 协议以外的复杂结构：
+
+```json
+{
+  "review_item_id": "review_ab12cd",
+  "status": "pending_review",
+  "version": 3,
+  "source": {
+    "name": "某研究院",
+    "url": "https://example.com/report"
+  },
+  "description": "...",
+  "chain": [],
+  "uncertainties": [],
+  "agent_claim": null,
+  "events": []
+}
+```
+
+说明：
+
+- `chain` 就是当前审核草稿，不再维护 `draft_records` + `draft_tree` 双事实源；
+- `uncertainties` 与 evidence 保持就地结构，不生成独立 Evidence Asset；
+- `focus_items` 不要求持久化，可由 Web ViewModel 根据 uncertainty 所在位置动态派生；
+- `stage / reason` 如保留，只能作为 Client best-effort 派生的展示辅助元数据，推导失败即 `other`，不得影响核心审核流程；
+- Agent 不输出这些内部字段。
+
+`chain=[]` 是合法 review，但 v1 不允许人工从零构建完整产业链；此时只能交回 AI 继续或驳回来源。
+
+---
+
+## 12. 人工审核动作
+
+review 级业务动作只有：
+
+### 12.1 采用当前结果
+
+当前 working copy 未修改且 Tree 非空：
+
+```text
+approve
+↓
+最终 chain + description
+↓
+Tree → records
+↓
+正式 source_group
+↓
+XLSX
+```
+
+### 12.2 修正后通过
+
+人工可修改：
+
+- 节点名称；
+- 新增根节点、同级节点、子节点；
 - 删除节点；
-- 新增 Agent 完全未发现的企业；
-- 删除错误企业；
-- 调整企业归属；
-- 最终提交修正后的来源组。
+- 节点顺序；
+- 父子关系；
+- 企业；
+- 企业归属；
+- Agent 遗漏的节点 / 企业；
+- `description`。
 
-v1 不限制人工修改必须是 Agent 原草稿的子集。
+最终提交完整 `chain + description`，不是 row patch。
+
+### 12.3 交回 AI 继续
+
+作用域仅当前 review_item 的当前版本和当前来源。
+
+不创建域名白名单，不修改 Skill，不影响其他来源。
+
+同一 review version 只能执行一次 return-to-agent；Agent 重新提交后产生新 version，人工才可基于新结果再次决定是否交回。
+
+### 12.4 驳回来源
+
+当前来源闭环为 rejected，不产生正式 source_group，不写 XLSX。
 
 ---
 
-## 7. Source Probe 与 Capability Gate
+## 13. Tree 人工编辑语义
 
-### 7.1 不使用固定 parser type 驱动
+Full Review 是唯一 Tree 编辑入口。
 
-系统不维护以下硬编码逻辑作为核心：
+支持：
+
+- rename；
+- add root；
+- add sibling；
+- add child；
+- delete；
+- change parent；
+- 同父节点拖拽排序；
+- 跨父节点拖拽整棵子树；
+- 新增遗漏企业；
+- 删除企业；
+- 将企业移动到其他节点。
+
+跨父节点移动时：
 
 ```text
-普通网页
-图片
-PDF
-表格
-交互式网站
-...
+A
+└─ B
+   ├─ C
+   └─ D
 ```
 
-这些可以是来源表现形式，但不能成为系统能力边界。
+将 B 拖到 X 下：
 
-### 7.2 Source Probe
+```text
+X
+└─ B
+   ├─ C
+   └─ D
+```
 
-Agent 对候选来源首先回答：
+B 的全部后代递归跟随。
+
+Client / UI 必须拒绝：
+
+- 节点拖到自己下面；
+- 节点拖到自己的后代下面；
+- 移动后正式分类深度超过 4。
+
+删除带子节点的节点必须明确展示影响，不允许静默丢失子树。
+
+---
+
+## 14. Agent 工作协议
+
+Agent-facing CLI 只保留极少动作：
+
+```text
+work claim-next
+source submit
+work done
+work fail
+```
+
+### 14.1 topic work
+
+```text
+work claim-next
+↓
+搜索多个候选来源
+↓
+明显不合格 → 直接跳过
+↓
+合格 → source submit accept
+↓
+边界来源 → source submit review
+↓
+继续搜索直到满足停止规则
+↓
+work done
+```
+
+`work done` 只表示：
+
+> 当前 topic 的本轮自动搜索阶段结束。
+
+它不代表 Agent 直接设置 `completed`。
+
+### 14.2 review work
+
+```text
+work claim-next
+↓
+取得当前 review source + chain + description + uncertainties + 人工交回上下文
+↓
+继续研究
+↓
+source submit accept | review
+↓
+本轮 review work 自动结束
+```
+
+review work 不需要额外 `work done`。
+
+### 14.3 fail
+
+`work fail` 只表示真正执行异常，例如浏览器无法继续、环境损坏等。
+
+来源不合格不是 fail。
+
+### 14.4 submit 成功即 Client 接管
+
+Agent 不需要提交后再读 Runner 校验 ID，也不需要再发送“已保存”。
+
+CLI 返回：
+
+```text
+accepted
+queued_for_review
+```
+
+即表示 Client 已接管。
+
+结构错误则返回可直接修正的确定性错误，例如：
+
+```text
+TREE_DEPTH_EXCEEDED
+当前节点位于第 5 层，正式分类最多支持 4 层
+```
+
+---
+
+## 15. Source Probe 与 Capability Gate
+
+HITL 不以固定 parser type 驱动。
+
+Agent 对候选来源首先判断：
 
 > 要取得完整业务证据，我需要做什么？
 
-Probe 可能发现：
+可能需要：
 
-- 静态正文已经充分；
-- 需要浏览器实际渲染；
-- 需要读取图片；
-- 需要打开 PDF 指定页面；
-- 需要展开折叠区；
-- 需要点击节点；
-- 需要切换 Tab；
-- 需要改变筛选条件；
-- 需要遍历多个交互状态。
+- 静态正文；
+- 浏览器实际渲染；
+- 视觉读图；
+- PDF 指定页；
+- 表格；
+- 展开折叠区；
+- 点击节点；
+- 切换 Tab；
+- 改变筛选条件；
+- 遍历多个交互状态。
 
-Agent 根据 Probe 形成 Retrieval Plan，并尝试自主完成。
-
-### 7.3 Capability Contract
-
-只有所有必要条件都可靠满足，来源才自动通过。
-
-| 能力维度 | 自动处理条件 |
-| --- | --- |
-| 内容获取 | Agent 能找到并执行取得完整业务内容的方法，不限定正文、图片或交互 |
-| 普通网页正文 | Agent 能完整读取所需正文 |
-| 网页产业链视觉内容 | 浏览器能实际看到并清楚读取 |
-| PDF | 能打开相关页并实际视觉读取 |
-| 表格 | 节点与企业关系清楚 |
-| 多张图 | 来源内部关系明确，可以确定各图用途 |
-| 浏览器交互 | 如证据依赖交互，Agent 能识别并稳定操作 |
-| 遍历完整性 | Agent 能判断需要访问哪些状态，并确认覆盖完成 |
-| 正文补充 | 能明确挂到已有节点 |
-| 企业归属 | 有来源内部直接证据 |
-| 节点覆盖 | 所有发现节点均已处理 |
-| 企业覆盖 | 所有发现企业均已处理 |
-| 图文 / 多证据关系 | 不存在无法消解的关键冲突 |
-
-### 7.4 三值判断
-
-Capability Gate 使用三类业务结果：
+Capability Gate 仍使用：
 
 ```text
 PASS
@@ -265,72 +786,47 @@ FAIL
 UNCERTAIN
 ```
 
-- `PASS`：可以可靠继续并自动完成。
-- `FAIL`：已经明确不满足来源准入或不可用条件，直接排除，不浪费人工。
-- `UNCERTAIN`：Agent 已主动探索，但关键判断无法可靠闭环，并且人工介入有现实机会解决，进入 `needs_review`。
+- `PASS` → `source submit` with `outcome=accept`；
+- `FAIL` → 明确不合格 / 不可用，Agent 直接跳过，不提交；
+- `UNCERTAIN` → 有业务价值且人工可能改变结论，`source submit` with `outcome=review`。
 
-`needs_review` 不等于“没见过这种网站”。
+`UNCERTAIN` 不等于“没见过这种网站”。Agent 应先自主探索。
 
 ---
 
-## 8. Chip Explorer 验收案例
+## 16. Chip Explorer 泛化验收
 
-`https://chipexplorer.eto.tech/` 作为 v1 的关键 generalized test。
+`https://chipexplorer.eto.tech/` 继续作为 generalized test。
 
-预期 Agent 行为：
+预期 Agent：
 
 ```text
 打开候选来源
 ↓
-普通正文无法取得完整产业链
-↓
-不能立即判定“无产业链”
+发现静态正文不足
 ↓
 使用浏览器实际查看
 ↓
-发现存在可交互节点
+发现节点可交互
 ↓
-尝试点击
+尝试点击并观察业务状态变化
 ↓
-观察点击后业务内容变化
+推断需要交互遍历
 ↓
-推断该来源需要交互遍历
-↓
-形成 Retrieval Plan
-↓
-尝试枚举并处理全部必要状态
+尝试覆盖全部必要状态
 ```
 
-理想结果是 Agent 自主完成并自动通过。
+理想结果是自主完成并 `accept`。
 
-只有当 Agent 已经理解交互规律，但仍无法可靠确认例如：
+只有已经理解交互规律、主动尝试后，仍不能可靠确认例如遍历完整性，才 `review`，并用自然语言 uncertainty + locator + description 告诉审核员去哪里看。
 
-- 是否存在未发现的隐藏节点；
-- 是否已经遍历完整；
-- 某些关键节点关系仍不明确；
-
-才进入 `needs_review`。
-
-Skill 不允许添加：
-
-```text
-if domain == chipexplorer.eto.tech:
-    使用特殊规则
-```
-
-否则该测试失去泛化意义。
+Skill 不允许增加域名专用特例。
 
 ---
 
-## 9. Topic 状态机
+## 17. Topic 状态机
 
-v1 新增正式 topic 状态：
-
-```text
-awaiting_review
-```
-
-完整状态：
+正式 topic 状态：
 
 ```text
 pending
@@ -341,258 +837,38 @@ no_qualified_source
 failed
 ```
 
-语义：
+Agent 不直接设置任何状态。
 
-- `pending`：尚未被 Agent 领取。
-- `in_progress`：Agent 正在执行主题自动阶段，有 claim / lease。
-- `awaiting_review`：Agent 已结束主题自动阶段并释放 claim，但还有未闭环 review_item。
-- `completed`：自动处理与人工审核均闭环，且存在正式来源。
-- `no_qualified_source`：所有流程闭环后不存在正式来源。
-- `failed`：主题自动阶段出现无法继续的执行异常。
-
-状态流：
+### 17.1 自动阶段
 
 ```text
 pending
   ↓ claim
 in_progress
-  ↓ Agent 完成自动阶段
+  ↓ work done
   ├─ 有 open review_item → awaiting_review
   ├─ 无 open review + 有 source_group → completed
   └─ 无 open review + 无 source_group → no_qualified_source
+```
 
+### 17.2 review 闭环
+
+```text
 awaiting_review
   ↓ 最后一个 review_item 闭环
   ├─ 有 source_group → completed
   └─ 无 source_group → no_qualified_source
 ```
 
-### 9.1 needs_review 不暂停整个主题
+### 17.3 review 不暂停 topic 自动搜索
 
-如果当前主题：
+一个来源 `review` 后，Agent 继续搜索该 topic 的其他来源，直到显式 `work done`。
 
-```text
-来源 A → auto pass
-来源 B → needs_review
-来源 C → auto pass
-来源 D → needs_review
-来源 E → reject
-```
-
-Agent 不因 B 停止整个主题。
-
-正确行为：
-
-```text
-B 创建 review_item
-↓
-继续处理 C / D / E
-↓
-完成搜索与当前自动阶段
-↓
-仍有 review_item
-↓
-主题进入 awaiting_review
-```
-
-因此 `needs_review` 是：
-
-> 当前来源暂停。
-
-不是：
-
-> 当前主题暂停。
+因此 review 只暂停当前来源，不暂停整个主题。
 
 ---
 
-## 10. Topic 数据模型
-
-在现有 topic 基础上新增：
-
-```json
-{
-  "node_id": "node_0001",
-  "主题": "锡膏",
-  "path": ["锡膏"],
-  "aliases": [],
-  "order": 1,
-
-  "status": "awaiting_review",
-  "last_error": null,
-  "claim": null,
-
-  "auto_phase_finished": true,
-
-  "source_groups": [],
-  "review_items": []
-}
-```
-
-### 10.1 auto_phase_finished
-
-该字段区分两种情况：
-
-1. Agent 已创建 review_item，但主题搜索还在继续；
-2. Agent 已完成该主题自动阶段，只剩人工审核。
-
-例如：
-
-```text
-status = in_progress
-auto_phase_finished = false
-review_items > 0
-```
-
-表示 Agent 仍需继续搜索和处理其它来源。
-
-Agent 完成当前主题搜索后，只报告“自动阶段结束”。CLI 设置：
-
-```text
-auto_phase_finished = true
-```
-
-再根据实际 `review_items` 与 `source_groups` 推导 topic 状态。
-
----
-
-## 11. ReviewItem 数据模型
-
-v1 的 review_item 保持轻量：
-
-```json
-{
-  "review_item_id": "review_ab12cd",
-  "order": 1,
-
-  "status": "pending_review",
-
-  "created_at": "...",
-  "updated_at": "...",
-
-  "source": {
-    "url": "https://chipexplorer.eto.tech/",
-    "source_name": "Emerging Technology Observatory"
-  },
-
-  "decision": {
-    "stage": "source_navigation",
-    "reason": "interaction_scope_uncertain",
-    "summary": "该来源需要点击节点取得完整产业链信息，目前无法可靠确认是否已经遍历全部节点。",
-    "confirmed": [
-      "静态正文不足以还原完整产业链",
-      "浏览器中存在可点击产业链节点",
-      "点击后页面展示内容发生业务意义变化"
-    ],
-    "uncertain": [
-      "是否已经发现全部必须访问的节点"
-    ]
-  },
-
-  "focus_items": [],
-  "draft_records": [],
-
-  "agent_claim": null,
-  "override": null,
-
-  "events": []
-}
-```
-
-### 11.1 draft_records 可以为空
-
-允许：
-
-```json
-"draft_records": []
-```
-
-审核队列表示“需要人工决策的来源”，不是“必须已经存在九字段草稿的来源”。
-
-例如 Agent 能判断：
-
-- 页面很可能有价值；
-- 页面需要特殊交互；
-- 但当前无法可靠形成任何产业链 records；
-
-仍可以创建 review_item。
-
-### 11.2 decision
-
-`decision` 只保留对人工有帮助的结论，不持久化完整思维过程。
-
-建议高层 `stage`：
-
-```text
-source_access
-source_qualification
-source_navigation
-visual_parse
-structure_parse
-company_mapping
-coverage_check
-evidence_conflict
-```
-
-建议高层 `reason` 示例：
-
-```text
-visual_unreadable
-interaction_scope_uncertain
-structure_ambiguous
-company_mapping_ambiguous
-source_incomplete
-evidence_conflict
-other
-```
-
-这些是内部语义，前端展示应翻译成人话。
-
-### 11.3 focus_items
-
-用于告诉审核员：
-
-> 本次真正需要你判断哪些点。
-
-例如：
-
-```json
-[
-  {
-    "type": "company_mapping",
-    "target": "华光新材",
-    "message": "无法确认该企业是否直接归属于锡焊膏生产制造"
-  }
-]
-```
-
-它只服务审核体验，不属于正式九字段数据。
-
-### 11.4 不新增独立 draft_tree
-
-v1 不在 Runner 中同时维护：
-
-```text
-draft_tree
-draft_records
-```
-
-避免双事实源。
-
-规则：
-
-```text
-draft_records
-↓ 前端加载时投影
-Tree View
-↓ 人工编辑
-Tree → records
-↓ CLI 校验
-正式 source_group
-```
-
----
-
-## 12. ReviewItem 状态机
+## 18. ReviewItem 状态机
 
 持久化状态：
 
@@ -604,1094 +880,249 @@ approved
 rejected
 ```
 
-状态流：
-
-```text
-                   ┌───────────────┐
-                   │pending_review │
-                   └───────┬───────┘
-                           │
-          ┌────────────────┼─────────────────┐
-          │                │                 │
-      人工采用         人工修正后采用      交回 Agent
-          │                │                 │
-          ▼                ▼                 ▼
-      approved         approved      returned_to_agent
-                                             │
-                                             │ work claim
-                                             ▼
-                                          in_agent
-                                             │
-                                  ┌──────────┴──────────┐
-                                  │                     │
-                             Agent成功            新的不确定问题
-                                  │                     │
-                                  ▼                     ▼
-                              approved           pending_review
-
-pending_review
-   └─ 人工驳回 → rejected
-```
-
-`approved` 表示该 review 工作已经闭环并形成正式业务结果。
-
-如果 Agent 在人工放行后成功完成当前来源，也最终进入 `approved`，不新增 `resolved_by_agent` 状态。
-
----
-
-## 13. 同一 URL 的重复送审
-
-同一 URL 在同一轮处理中只维护一个 review_item。
-
-例如：
-
-```text
-第一次：
-interaction_scope_uncertain
-↓
-人工交回 Agent
-↓
-Agent继续
-↓
-出现新的：company_mapping_ambiguous
-```
-
-不创建 `review_2`。
-
-而是：
-
-```text
-复用原 review_item
-↓
-更新 decision
-↓
-status 重新 pending_review
-```
-
-旧过程通过 `events` 保留。
-
-### 13.1 极简 events
-
-只记录动作事实，不记录完整推理：
-
-```json
-[
-  {
-    "at": "...",
-    "actor": "agent",
-    "action": "submitted",
-    "reason": "interaction_scope_uncertain"
-  },
-  {
-    "at": "...",
-    "actor": "human",
-    "action": "returned_to_agent"
-  },
-  {
-    "at": "...",
-    "actor": "agent",
-    "action": "resubmitted",
-    "reason": "company_mapping_ambiguous"
-  }
-]
-```
-
-目的仅是让审核员知道：
-
-> 为什么这篇文章又回来了？
-
-不是建设审计系统。
-
----
-
-## 14. Human Override
-
-人工认为：
-
-> 这篇来源不需要人在当前问题上判断，Agent 可以继续。
-
-前端动作：
-
-```text
-交回 AI 继续
-```
-
-CLI 将当前 review_item 设置为：
-
-```text
-returned_to_agent
-```
-
-并保存一次性 override：
-
-```json
-{
-  "bypass_reason": "interaction_scope_uncertain",
-  "instruction": "人工确认当前来源可以继续自主遍历",
-  "created_at": "..."
-}
-```
-
-### 14.1 Override 范围
-
-只作用于：
-
-```text
-当前 review_item
-+
-当前 URL
-+
-当前被放行 reason
-```
-
-不作用于：
-
-- 同域名其它 URL；
-- 未来 Runner；
-- 未来任务；
-- 其它 review_item；
-- 新出现的其它不确定问题。
-
-### 14.2 防止审核死循环
-
-Agent 领取该 review work 后：
-
-> 不得因为同一个 `bypass_reason` 原样再次送审。
-
-但如果出现真正的新问题，例如：
-
-```text
-company_mapping_ambiguous
-```
-
-仍然可以重新进入 `pending_review`。
-
-旧 override 消费后失效。
-
----
-
-## 15. 人工审核动作
-
-v1 前端核心只需要四类业务动作。
-
-### 15.1 采用当前结果
-
-适用于 Agent 草稿已经足够可靠。
-
-```text
-review approve
-↓
-校验 draft_records
-↓
-转为正式 source_group
-↓
-刷新 Runner / XLSX
-```
-
-如果 `draft_records=[]`，该动作不可用。
-
-### 15.2 修正后通过
-
-人工可以修改完整来源结果，包括 Agent 未识别出的节点和企业。
-
-流程：
-
-```text
-Tree View 编辑
-↓
-生成九字段 records
-↓
-CLI 使用现有 Dataset 确定性规则校验
-↓
-正式 source_group
-↓
-review approved
-```
-
-### 15.3 交回 AI 继续
-
-含义不是“数据通过”，而是：
-
-> 当前问题不需要人工判断，允许 Agent 对当前 URL 继续探索。
+典型流转：
 
 ```text
 pending_review
-↓
-returned_to_agent
-↓
-进入 Agent work queue
+├─ approve → approved
+├─ reject → rejected
+└─ return-to-agent → returned_to_agent
+                       ↓ claim
+                    in_agent
+                       ↓ source submit
+                 ┌─────┴─────┐
+              accept         review
+                ↓              ↓
+             approved      pending_review
 ```
 
-### 15.4 驳回来源
-
-人认为该来源不应进入正式数据。
-
-```text
-pending_review
-↓
-rejected
-```
-
-不写入 `source_groups`，不进入 XLSX。
+Agent 只提交 SourceResult，不直接写 review status。
 
 ---
 
-## 16. 审核前端设计原则
+## 19. 调度
 
-### 16.1 第一屏先告诉人“为什么你要看它”
-
-审核卡片优先展示：
+统一：
 
 ```text
-需要人工判断：交互遍历范围
-
-AI 已确认：
-✓ 静态正文不足
-✓ 浏览器存在产业链节点
-✓ 节点可点击
-✓ 点击后业务内容变化
-
-AI 卡在：
-? 无法确认是否已经发现全部节点
-
-本次需要你：
-确认是否允许 Agent 继续自主遍历
+industry-chain work claim-next
 ```
 
-而不是先展示 JSON 或九字段表格。
-
-### 16.2 尽量把人工工作压缩成“决策”
-
-例如 30 个节点中只有 2 个企业归属不确定：
+优先级：
 
 ```text
-本次只需要确认 2 处
+可领取的 returned_to_agent review work
+↓
+普通 pending topic work
 ```
 
-前端默认定位到 `focus_items`，而不是要求人从头审完整产业链。
+CLI 返回 work context，Agent 不自己扫描 Runner JSON 决定下一项任务。
 
-### 16.3 Tree View 为主，九字段为底层协议
-
-审核页面主要展示：
-
-```text
-上游
-├─ 锡粉
-│  └ 康普锡威
-├─ 助焊剂
-
-中游
-└─ 锡焊膏生产制造
-   ├─ 唯特偶
-   └─ 华光新材
-```
-
-支持：
-
-- 修改节点；
-- 新增 / 删除节点；
-- 调整父子关系；
-- 新增 / 删除企业；
-- 修改企业挂载。
-
-提交时转换为当前九字段 records。
-
-### 16.4 无草稿时不展示空编辑器
-
-如果：
-
-```text
-draft_records = []
-```
-
-页面重点显示来源、AI 已做的探索、当前卡点和：
-
-```text
-[交回 AI 继续]
-[驳回来源]
-```
-
-不强迫用户面对一张空表。
+review claim 与 topic claim 都有租约；租约、续租和过期恢复由 CLI 管理。
 
 ---
 
-## 17. CLI 架构
+## 20. 并发与原子性
 
-现有 CLI 包含：
+### 20.1 Runner JSON
 
-```text
-identity
-runner
-topic
-dataset
-```
+Runner JSON 是唯一任务事实源。
 
-v1 增加两个职责层。
+### 20.2 XLSX
 
-### 17.1 review 命令组
+XLSX 只投影正式 source_groups。
 
-用于审核业务动作与调试：
+review 草稿、uncertainty、evidence 描述不得提前进入 XLSX。
 
-```text
-review list
-review get
-review submit
-review approve
-review return-to-agent
-review reject
-```
+### 20.3 来源组原子写入
 
-原则：
-
-> Agent 和前端只能调用业务动作，不允许直接 patch review 内部状态字段。
-
-也就是说不允许：
+一个 `accept` 或人工 approve 必须：
 
 ```text
-dataset patch review.status=approved
-```
-
-状态机只能在 ReviewService 内部迁移。
-
-### 17.2 work 命令组
-
-`work` 是 Agent 使用的统一调度 facade，不是新的持久化业务实体。
-
-建议：
-
-```text
-work claim-next
-work renew
-work finish
-work fail
-```
-
-Agent 主窗口日常只需要：
-
-```text
-work claim-next --runner-id ...
-```
-
-CLI 返回统一 Work Item。
-
----
-
-## 18. Work 调度
-
-### 18.1 调度优先级
-
-默认：
-
-```text
-1. returned_to_agent review work
-2. pending / 可重领 topic work
-3. 无 Agent 工作
-```
-
-人工已经介入并退回的任务优先闭环，不长期积压在普通 topic 后面。
-
-### 18.2 NO_AGENT_WORK
-
-如果：
-
-- 没有 `returned_to_agent` review；
-- 没有可领取 topic；
-- 但存在 `pending_review`；
-
-CLI 返回：
-
-```text
-NO_AGENT_WORK
-runner_status = awaiting_review
-```
-
-含义是：
-
-> Agent 当前无需继续工作，系统正在等人。
-
----
-
-## 19. Unified Work Item
-
-### 19.1 Topic Work
-
-```json
-{
-  "work_type": "topic",
-  "runner_id": "...",
-  "node_id": "node_0003",
-  "topic": {
-    "name": "锡膏",
-    "path": ["锡膏"],
-    "aliases": []
-  },
-  "claim_token": "...",
-  "lease_expires_at": "..."
-}
-```
-
-Skill 入口：
-
-```text
-完整主题流程
-```
-
-包括：
-
-- 搜索；
-- Source Probe；
-- Retrieval Plan；
-- 来源判断；
-- 来源级事务；
-- 需要时 review submit；
-- 搜索饱和；
-- 自动阶段结束。
-
-### 19.2 Review Work
-
-```json
-{
-  "work_type": "review",
-  "runner_id": "...",
-  "node_id": "node_0003",
-  "review_item_id": "review_123",
-  "topic": {
-    "name": "芯片产业链"
-  },
-  "source": {
-    "url": "https://chipexplorer.eto.tech/"
-  },
-  "previous_attempt": {
-    "stage": "source_navigation",
-    "reason": "interaction_scope_uncertain",
-    "summary": "..."
-  },
-  "human_override": {
-    "bypass_reason": "interaction_scope_uncertain",
-    "instruction": "允许继续自主遍历当前来源"
-  },
-  "draft_records": [],
-  "claim_token": "...",
-  "lease_expires_at": "..."
-}
-```
-
-Skill 入口：
-
-```text
-人工退回来源继续流程
-```
-
-该流程禁止：
-
-- 重新开放主题搜索；
-- 新找其它来源；
-- 自行领取别的 topic；
-- 忽略 human override；
-
-只处理当前固定 URL。
-
----
-
-## 20. Agent 主窗口协议
-
-Codex、Claude Code、Trae 不分别实现不同业务流程。
-
-统一要求：
-
-1. 读取当前仓库 `SKILL.md`。
-2. 对指定 Runner 调用 CLI `work claim-next`。
-3. 根据 `work_type` 选择 Skill 对应入口。
-4. 严格只处理当前 Work Item。
-5. 将业务结果提交回 CLI。
-6. 再领取下一 Work Item。
-
-典型用户操作：
-
-```text
-继续处理这个 Runner。
-```
-
-Agent 内部：
-
-```text
-work claim-next
+完整 Tree 校验
 ↓
-处理
+完整 records 投影
 ↓
-work finish / fail
+完整来源组业务校验
 ↓
-work claim-next
-↓
-...
-```
-
-任务状态必须全部存在 Runner 中，不依赖聊天上下文。
-
-因此可以：
-
-```text
-Claude Code 跑一半关闭
-↓
-稍后用 Codex 打开同仓库
-↓
-继续同一个 Runner
-```
-
-新 Agent 从 CLI 恢复工作状态。
-
----
-
-## 21. Lease 与并发
-
-Topic Work 与 Review Work 都必须支持：
-
-```text
-claim_token
-claimed_at
-lease_expires_at
-renew
-```
-
-原因：
-
-多个 Codex / Claude Code / Trae 窗口可能同时执行同一个 Runner。
-
-如果 Review Work 无租约，多个 Agent 可能同时处理同一个人工退回 URL。
-
-因此 `work claim-next` 必须原子领取。
-
-Review Work 的 Agent 执行失败应尽量局部化：
-
-- 释放 / 恢复 review work；
-- 不因为某个 review work 的浏览器异常直接抹掉已经存在的正式来源；
-- topic 仍保持可恢复状态。
-
----
-
-## 22. 正式数据写入
-
-正式来源只有两条路径进入 `source_groups`。
-
-### 22.1 Agent 自动通过
-
-```text
-Source Probe / Parse
-↓
-Capability Contract PASS
-↓
-完整 records
-↓
-dataset source_group insert
-↓
-source_groups
-```
-
-### 22.2 Review 闭环
-
-```text
-review_item
-↓
-人工采用 / 修正后采用
-OR
-人工退回 Agent 后 Agent 成功完成
-↓
-完整 records
-↓
-现有 Dataset 校验
-↓
-source_groups
-```
-
-所有正式数据仍遵守项目原有规则：
-
-- 一文一链；
-- 不跨来源融合；
-- 九字段约束；
-- 来源组 topic 一致；
-- 去重规则；
-- 公司归属规则；
-- 节点层级规则；
-- 备注位置规则；
-- Runner JSON 与 XLSX 投影规则。
-
----
-
-## 23. XLSX 行为
-
-XLSX 永远只投影：
-
-```text
-source_groups
-```
-
-不投影：
-
-```text
-pending_review
-returned_to_agent
-in_agent
-```
-
-因此不会发生：
-
-```text
-待审核来源先进入交付 Excel
-↓
-人工发现错误
-↓
-再删除
-```
-
-人工审核最终产生正式来源后，由现有 Runner 数据持久化流程刷新 XLSX。
-
----
-
-## 24. 前端与 CLI 的职责边界
-
-前端不直接计算状态。
-
-例如人点击：
-
-```text
-采用当前结果
-```
-
-前端只提交：
-
-```text
-review approve
-```
-
-CLI 负责：
-
-```text
-校验 records
-↓
-建立 source_group
-↓
-review → approved
-↓
-检查该 topic 其它 open review
-↓
-必要时 topic → completed
+原子写 Runner
 ↓
 刷新 XLSX
 ```
 
-人点击：
+任一步失败不得留下半个 source_group。
+
+### 20.4 Review 乐观并发
+
+每个 review_item 有整数 `version`。
+
+人工提交必须带 `expected_version`。
+
+如果版本不一致：
 
 ```text
-交回 AI 继续
+HTTP 409 / REVIEW_VERSION_CONFLICT
 ```
 
-前端只提交：
-
-```text
-review return-to-agent
-```
-
-CLI 负责：
-
-```text
-写入一次性 override
-↓
-review → returned_to_agent
-↓
-进入 Agent work queue
-```
-
-状态 bookkeeping 不暴露给审核员。
+不允许静默覆盖 Agent 或另一次人工操作产生的新版本。
 
 ---
 
-## 25. v1 推荐代码边界
+## 21. Web ViewModel 派生规则
 
-基于当前项目结构，推荐保持现有职责并增加小而明确的模块。
+Web 可以从 review_item 动态派生 focus，不要求 Agent 或 Runner 持久化 focus ID。
 
-现有：
-
-```text
-runner.py
-    topic / runner 生命周期
-
-dataset.py
-    正式数据校验与 source_group / row 操作
-
-storage.py
-    Runner JSON + XLSX 原子持久化
-
-cli.py
-    CLI 命令入口
-```
-
-建议新增：
+派生规则：
 
 ```text
-review.py
-    ReviewService
-    review_item 创建、人工动作、状态转换、override
+根级 uncertainty
+→ source focus
 
-work.py
-    WorkService
-    统一 Agent 调度、claim / renew / finish / fail
+node.uncertainties[] 且无 company
+→ node focus，目标由当前 root-to-node path 决定
+
+node.uncertainties[] 且有 company
+→ company occurrence focus，目标 = 当前 node path + company
 ```
 
-`work.py` 不保存独立 work 数据库，只从 Runner 当前状态推导并领取 topic / review 工作。
+`stage / reason` 如保留，只用于展示和筛选的 best-effort metadata：
 
-前端作为独立薄层调用 CLI / 后续轻量 API，不复制业务状态机。
+- 能简单确定就归类；
+- 无法确定就 `other`；
+- 不参与是否可 approve、是否进入 review、是否能回 Agent 等核心判断。
 
 ---
 
-## 26. Skill 需要增加的核心规则
+## 22. 审核完成后的数据边界
 
-Skill 需要从“尽量给答案”转为：
-
-> 能可靠闭环则自动完成；不能可靠闭环则允许把当前来源交给人。
-
-关键新增：
-
-### 26.1 Source Probe
-
-候选来源不能只做静态正文判断。
-
-Agent 应根据实际页面主动判断：
-
-- 是否需要浏览器；
-- 是否存在交互；
-- 点击 / 展开是否产生业务数据；
-- 是否需要遍历多个页面状态；
-- 如何判断遍历结束。
-
-### 26.2 不因“陌生”直接送审
-
-陌生页面首先触发自主探索。
-
-只有自主探索后仍无法形成可靠闭环，才 `needs_review`。
-
-### 26.3 当前来源送审后继续主题
-
-review submit 成功后：
+最终正式来源只保留对业务交付有意义的内容：
 
 ```text
-当前来源结束
+source
+final description
+final chain
 ↓
-继续搜索 / 处理其它候选来源
+九字段 source_group
+↓
+XLSX
 ```
 
-不得因为一个 review_item 阻塞整个 topic。
+审核中的：
 
-### 26.4 Review Work 严格限定当前 URL
+```text
+uncertainties
+evidence locator / description
+review events
+```
 
-领取 `work_type=review` 后：
+属于 review workflow 信息，不进入正式九字段。
 
-- 只处理 CLI 返回的 URL；
-- 从上一次卡点继续；
-- 执行 human override；
-- 不因为相同 bypass_reason 原样再次送审；
-- 新问题可以重新送审；
-- 不扩展为新主题搜索。
+人工修改解决了某个 uncertainty 后，不需要把旧不确定性写进最终备注。
 
 ---
 
-## 27. MVP 前端页面
+## 23. v1 非目标
 
-v1 只需要一个审核工作台，不需要建设完整运营后台。
+明确不做：
 
-### 27.1 列表页
-
-展示：
-
-- 待审核数量；
-- 主题；
-- 来源主体；
-- 当前需要人工判断的问题；
-- review 状态；
-- 简短 AI summary。
-
-只重点展示 `pending_review`。
-
-### 27.2 详情页
-
-从上到下：
-
-1. 主题与来源；
-2. 打开原网页；
-3. 为什么送审；
-4. AI 已确认什么；
-5. AI 仍不确定什么；
-6. 本次 focus_items；
-7. 如有草稿，展示产业链 Tree View；
-8. 人工编辑；
-9. 四类业务动作。
-
-核心按钮：
-
-```text
-采用当前结果
-修正后通过
-交回 AI 继续
-驳回来源
-```
-
-根据当前数据状态动态禁用不适用按钮。
+- 所有来源都人工审核；
+- `reject` SourceResult；
+- Agent 直接输出九字段；
+- Agent 生成内部 ID；
+- Agent 管理 topic / review 状态；
+- `draft_records` 与 `draft_tree` 双模型；
+- 独立 `focus_items` 持久化要求；
+- 独立 Evidence DB；
+- Evidence Asset / 截图归档；
+- 图片 serving API / Lightbox；
+- OCR 编辑器；
+- 全量浏览器录像；
+- 数据库、Redis、消息队列；
+- 复杂置信度体系；
+- parser 注册中心；
+- 域名白名单；
+- 自动修改 Skill；
+- 从空白 review 纯人工构造完整产业链；
+- 完整 chain-of-thought、Prompt、token 记录。
 
 ---
 
-## 28. MVP 验收场景
+## 24. v1 验收标准
 
-### Case 1：普通清晰产业链图
+### A. 正常自动来源
 
-预期：
+Agent 提交 `accept + source + description + chain`；Client 自动 Tree → 九字段、原子写来源组并刷新 XLSX。
 
-```text
-PASS
-↓
-直接 source_group
-↓
-不进入 review
-```
+### B. 明确不合格候选
 
-### Case 2：图片关键连接关系模糊
+Agent 直接跳过；Runner 中不产生 reject 对象。
 
-Agent 已主动查看、必要时有限放大，但关键父子关系仍无法判断。
+### C. 节点不确定性
 
-预期：
+uncertainty 挂在具体节点；Client 能通过 Tree path 唯一定位。
 
-```text
-UNCERTAIN
-↓
-pending_review
-```
+### D. 同名企业多节点
 
-前端直接提示需要确认的连接关系。
+同一企业出现在两个节点，其中只有一个 occurrence 有 uncertainty；Client 能通过 `node path + company` 唯一定位，不串到另一个节点。
 
-### Case 3：明确不合格来源
+### E. 多证据
 
-例如主题不一致 / 非产业链 / 没有企业证据且已可明确判断。
+一个 uncertainty 可提供多个 `locator + description`，不要求 evidence ID 或截图资产。
 
-预期：
+### F. 无草稿 review
 
-```text
-FAIL
-↓
-直接排除
-```
+`review + chain=[] + uncertainty` 合法；Web 只允许交回 AI 或驳回，不允许直接 approve / 从零人工建链。
 
-不进入人工队列。
+### G. 人工修正
 
-### Case 4：Chip Explorer
+人工修改 Tree 和 description 后 approve；Client 重新完整投影九字段，最终 XLSX 只包含修正后的正式来源。
 
-Agent 事先没有站点专属规则。
+### H. 交回 AI
 
-预期至少能自主识别：
+同一个 review_item 被交回后，Agent 仍使用同一 `source submit`；`accept` 则闭环，`review` 则更新同一 review_item 快照，不新建 review 链。
 
-```text
-静态正文不足
-↓
-需要浏览器
-↓
-存在点击式交互
-↓
-点击改变业务内容
-↓
-需要交互遍历
-```
+### I. topic 完成
 
-如果可以完整遍历：自动完成。
+Agent 搜索期间可连续 `source submit` 多个来源，最终只调用一次 `work done`；Client 自行推导 `awaiting_review / completed / no_qualified_source`。
 
-如果无法判断遍历完整性：创建 `needs_review`。
+### J. review work 完成
 
-不得错误判定：
+review work 只需一次 `source submit`，不要求额外 finish。
 
-```text
-没有普通正文 → 没有产业链
-```
+### K. 原子性
 
-### Case 5：人工交回 Agent
+Tree 校验、records 校验或 XLSX 刷新失败时，不留下半写 source_group。
 
-```text
-interaction_scope_uncertain
-↓
-pending_review
-↓
-人工“交回 AI 继续”
-↓
-returned_to_agent
-↓
-work claim-next 优先领取
-↓
-Agent 不得因同一 reason 再次原样送审
-```
+### L. Chip Explorer
 
-### Case 6：人工放行后出现新问题
-
-第一次：
-
-```text
-interaction_scope_uncertain
-```
-
-人工放行后出现：
-
-```text
-company_mapping_ambiguous
-```
-
-预期：
-
-- 不创建第二个 review_item；
-- 更新原 review_item decision；
-- 重新 `pending_review`；
-- events 能看到第一次人工放行。
-
-### Case 7：人工新增 Agent 漏掉节点
-
-人工在 Tree View 新增节点 / 企业并通过。
-
-预期：
-
-- 能转换为九字段 records；
-- 通过 Dataset 确定性校验；
-- 成为正式 source_group；
-- XLSX 更新。
-
-### Case 8：主题部分来源送审
-
-```text
-A auto pass
-B needs_review
-C auto pass
-```
-
-预期：
-
-- B 不阻塞 C；
-- A/C 先进入正式 source_groups；
-- 自动阶段结束后 topic = awaiting_review；
-- B 闭环后自动进入 completed。
-
-### Case 9：多 Agent 并发领取
-
-两个主窗口同时 `work claim-next`。
-
-预期：
-
-- 同一 topic 不被重复领取；
-- 同一 returned review 不被重复领取；
-- lease 过期后可以恢复。
+Agent 在没有域名专用规则的情况下能主动发现交互需求并探索；无法确认遍历完整时，提交 `review` 并给出自然语言 locator / evidence description。
 
 ---
 
-## 29. v1 成功标准
+## 25. 核心结论
 
-系统上线后应达到：
-
-1. 普通来源的自动处理路径基本不增加人工操作。
-2. Agent 明确知道“可以交给人”，不再为了完成任务强行猜测。
-3. 新型来源先自主 Probe，而不是依赖不断增加站点特例。
-4. 审核员一打开卡片就知道为什么需要自己介入。
-5. 审核员主要处理少量决策点，而不是重新研究整篇来源。
-6. 人工可以完全修正 Agent 结果。
-7. 人工可以把当前 URL 一次性交回 Agent。
-8. 同一个来源可以经历多轮 Agent ↔ Human，但只保留一个审核卡片。
-9. Codex / Claude Code / Trae 可中途切换，任务状态不依赖聊天窗口。
-10. CLI 能独立管理工作优先级、状态机、租约和完成判定。
-11. 待审数据不污染 XLSX 正式交付。
-12. Chip Explorer 类交互网站能作为未知解析能力测试，而不是域名特例。
-
----
-
-## 30. 明确推迟到 v1 之后的问题
-
-以下内容不作为 v1 实现前置条件：
-
-### 30.1 站点专属规则建议
-
-未来可以：
+系统边界最终收敛为：
 
 ```text
-同类来源多次被人工以相同方式处理
-↓
-AI 提示是否形成站点规则
-↓
-人明确批准
+Agent
+= 找 + 读 + 理解 + 表达
+
+Client
+= 验证 + 转换 + 编号 + 调度 + 持久化 + 审核编排 + XLSX
 ```
 
-但 v1 不自动学习域名规则。
-
-### 30.2 人工修改统计与模型优化
-
-未来可以分析：
-
-- Agent 直接正确比例；
-- 人工修改比例；
-- 人工新增比例；
-- 高频 review_reason。
-
-v1 的极简 events 可以为未来留下基础，但不建设分析平台。
-
-### 30.3 人工修改的额外证据持久化
-
-现有产业链业务规则仍要求来源内部证据，但 v1 不新增强制的逐行 evidence 数据库 / evidence schema。
-
-是否在后续版本要求人工新增节点或企业显式绑定段落、截图、页码等额外证据，是独立设计问题。
-
-### 30.4 已人工确认数据的再次 AI 分析
-
-未来可以让升级后的 Agent 对人工结果提出 diff 建议，但：
+Agent-facing 协议只需要理解：
 
 ```text
-人工正式结果 > 后续 AI 建议
+outcome
+source.name
+source.url
+description
+chain
+review 时的就地 uncertainties
+uncertainty 的 locator + description
 ```
 
-v1 不包含 re-analysis 流程。
+其余全部属于 Client 内部实现。
 
----
-
-## 31. 最终设计总结
-
-v1 的本质不是“给产业链项目加一个审核网页”。
-
-它真正增加的是一个明确的业务闭环：
-
-```text
-Candidate Source
-       ↓
-Source Probe
-       ↓
-Retrieval Plan
-       ↓
-Capability Gate
-       ↓
-┌─────────────┬─────────────┬──────────────┐
-│ PASS        │ FAIL        │ UNCERTAIN    │
-│             │             │              │
-│ 自动完成    │ 自动排除    │ review_item  │
-└──────┬──────┴─────────────┴───────┬──────┘
-       │                            │
-       │                      Human Review
-       │                 ┌──────────┼──────────┐
-       │                 │          │          │
-       │               采用       修正      交回 AI
-       │                 │          │          │
-       │                 └────┬─────┘          │
-       │                      │                │
-       │                      │         returned_to_agent
-       │                      │                │
-       │                      │        Agent Work Queue
-       │                      │                │
-       └──────────────────────┴────────────────┘
-                              ↓
-                        source_groups
-                              ↓
-                         Runner JSON
-                              ↓
-                             XLSX
-```
-
-整个系统坚持：
-
-> CLI 调度，Agent 执行，Skill 约束，人类决策，Runner 记忆，XLSX 交付。
-
-这使自动化能力可以继续扩展，同时为真正的边界情况留下一个不会破坏正式数据、不会卡死流水线、也不会把人工重新变成“从头研究员”的安全出口。
+这条边界优先级高于继续扩展 HITL 内部字段。
