@@ -50,7 +50,7 @@ def _require_pending(review: dict) -> None:
         raise ClientError("REVIEW_ACTION_NOT_ALLOWED", "当前审核状态不允许执行该动作")
 
 
-def _append_event(review: dict, event_type: str, timestamp: str) -> None:
+def append_review_event(review: dict, event_type: str, timestamp: str) -> None:
     """记录最小审核业务事件。"""
     review["events"].append(
         {"type": event_type, "at": timestamp, "version": review["version"]}
@@ -108,7 +108,7 @@ class ReviewService:
             "agent_claim": None,
             "events": [],
         }
-        _append_event(review, "review_created", timestamp)
+        append_review_event(review, "review_created", timestamp)
         reviews.append(review)
         return copy.deepcopy(review)
 
@@ -149,7 +149,7 @@ class ReviewService:
             review["agent_claim"] = None
             review["version"] += 1
             review["updated_at"] = timestamp
-            _append_event(review, "review_approved", timestamp)
+            append_review_event(review, "review_approved", timestamp)
             refresh_topic_status(topic)
             state["updated_at"] = timestamp
             return {
@@ -177,7 +177,7 @@ class ReviewService:
             review["agent_claim"] = None
             review["version"] += 1
             review["updated_at"] = timestamp
-            _append_event(review, "review_returned_to_agent", timestamp)
+            append_review_event(review, "review_returned_to_agent", timestamp)
             refresh_topic_status(topic)
             state["updated_at"] = timestamp
             return copy.deepcopy(review)
@@ -202,7 +202,7 @@ class ReviewService:
             review["agent_claim"] = None
             review["version"] += 1
             review["updated_at"] = timestamp
-            _append_event(review, "review_rejected", timestamp)
+            append_review_event(review, "review_rejected", timestamp)
             refresh_topic_status(topic)
             state["updated_at"] = timestamp
             return copy.deepcopy(review)

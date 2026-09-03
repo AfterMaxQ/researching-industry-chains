@@ -42,14 +42,21 @@ def refresh_topic_status(topic: dict) -> str:
     return topic["status"]
 
 
-def new_claim(token: str, now: datetime) -> dict:
+def new_claim(
+    token: str,
+    now: datetime,
+    worker_label: str | None = None,
+) -> dict:
     """创建一份新的主题领取租约。"""
     expires_at = now + timedelta(seconds=LEASE_SECONDS)
-    return {
+    claim = {
         "token": token,
         "claimed_at": now.isoformat(),
         "lease_expires_at": expires_at.isoformat(),
     }
+    if worker_label is not None:
+        claim["worker_label"] = worker_label
+    return claim
 
 
 def require_and_renew_claim(topic: dict, claim_token: str, now: datetime) -> None:
