@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+runs/
+node_modules/
+skills/researching-industry-chains/src/industry_chain_skills/web_dist/
